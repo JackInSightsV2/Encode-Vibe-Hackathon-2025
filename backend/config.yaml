@@ -1,0 +1,108 @@
+server:
+  port: 8080
+  host: "localhost"
+  target_url: "http://localhost:8081"  # Legacy support
+
+providers:
+  # Official SDKs (preferred) - API keys via environment variables
+  openai:
+    name: "OpenAI"
+    api_key: ""  # Set via environment variable or frontend UI
+    models: ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"]
+    timeout: 30
+  anthropic:
+    name: "Anthropic"
+    api_key: ""  # Set via ANTHROPIC_API_KEY env var - uses official SDK
+    models: ["claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"]
+    timeout: 30
+  
+  # Custom endpoints (for local LLMs, other APIs)
+  local:
+    name: "Local"
+    api_key: ""
+    base_url: "http://localhost:11434/v1"  # Ollama default
+    models: ["llama2", "mistral", "codellama"]
+    headers:
+      Content-Type: "application/json"
+    timeout: 60
+  mock:
+    name: "Mock AI Service"
+    api_key: ""
+    base_url: "http://localhost:8081"
+    models: ["mock-ai-v1"]
+    headers:
+      Content-Type: "application/json"
+    timeout: 10
+
+routing:
+  default_provider: "mock"  # Use mock service by default for testing
+  model_routing:
+    gpt-4: "openai"
+    gpt-3.5-turbo: "openai"
+    gpt-4o: "openai"
+    claude-3: "anthropic"
+    claude-3-sonnet: "anthropic"
+    llama2: "local"
+    mistral: "local"
+    mock-ai-v1: "mock"
+  fallback_chain: ["mock", "local", "openai", "anthropic"]
+
+security:
+  prompt_injection:
+    enabled: true
+    sensitivity: "high"
+    patterns:
+      - "ignore previous instructions"
+      - "forget everything"
+      - "new instructions:"
+      - "you are now"
+      - "developer mode"
+      - "jailbreak"
+      - "DAN mode"
+      - "act as"
+      - "pretend you are"
+      - "roleplay as"
+
+moderation:
+  enabled: true
+  severity: "medium"
+  blocked_words:
+    - "violence"
+    - "hate"
+    - "explicit"
+    - "harmful"
+    - "suicide"
+    - "self-harm"
+    - "terrorist"
+    - "bomb"
+    - "weapon"
+  layers:
+    - type: "regex"
+      threshold: 1.0
+    - type: "llm"
+      provider: "openai"
+      model: "gpt-3.5-turbo"
+      prompt: "Analyze this message for harmful content. Respond with 'SAFE' or 'UNSAFE' followed by a brief reason."
+      threshold: 0.8
+  # Legacy support
+  use_openai: false
+
+relevance:
+  enabled: false
+  threshold: 0.7
+  provider: "openai"
+  model: "text-embedding-3-small"
+  # Legacy support
+  use_openai: true
+
+kill_switch:
+  enabled: true
+  blocked_users: []
+  blocked_sessions: []
+
+logging:
+  enabled: true
+  log_file: "logs/qt1.log"
+  log_level: "info"
+  use_sqlite: false
+  sqlite_db: "logs/qt1.db"
