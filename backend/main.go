@@ -38,6 +38,8 @@ func main() {
 	http.HandleFunc("/chat", proxy.HandleChat)
 	http.HandleFunc("/test-openai", proxy.TestOpenAIHandler)
 	http.HandleFunc("/health", handleHealth)
+	http.HandleFunc("/ws", api.WSManager.HandleWebSocket)           // Development endpoint
+	http.HandleFunc("/ws-secure", api.WSManager.HandleWebSocketSecure) // Production endpoint
 	
 	// CORS middleware wrapper
 	corsHandler := func(handler http.HandlerFunc) http.HandlerFunc {
@@ -60,6 +62,10 @@ func main() {
 	http.HandleFunc("/api/logs", corsHandler(api.HandleLogs))
 	http.HandleFunc("/api/status", corsHandler(api.HandleStatus))
 	http.HandleFunc("/api/killswitch", corsHandler(api.HandleKillSwitch))
+	
+	// Authentication routes
+	http.HandleFunc("/api/login", corsHandler(api.HandleLogin))
+	http.HandleFunc("/api/validate-token", corsHandler(api.HandleTokenValidation))
 	
 	// Serve React frontend static files
 	distPath := "../frontend/dist"

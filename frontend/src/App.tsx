@@ -5,6 +5,8 @@ import Playground from './components/Playground'
 import Logs from './components/Logs'
 import KillSwitch from './components/KillSwitch'
 import Documentation from './components/Documentation'
+import ConnectionStatus from './components/ConnectionStatus'
+import { WebSocketProvider } from './contexts/WebSocketContext'
 
 type Page = 'dashboard' | 'config' | 'playground' | 'logs' | 'killswitch' | 'docs'
 
@@ -59,7 +61,8 @@ function App() {
   ]
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+    <WebSocketProvider autoConnect={true}>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
       {/* Header */}
       <header className="bg-white shadow-lg border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -76,16 +79,22 @@ function App() {
                 </div>
               </div>
               
-              {/* Status Indicator */}
-              <div className="flex items-center space-x-2">
-                <div className={`w-2 h-2 rounded-full ${
-                  systemStatus?.status === 'healthy' ? 'bg-green-500' : 'bg-red-500'
-                } animate-pulse`}></div>
-                <span className={`text-sm font-medium ${
-                  systemStatus?.status === 'healthy' ? 'text-green-700' : 'text-red-700'
-                }`}>
-                  {systemStatus?.status === 'healthy' ? 'System Online' : 'System Offline'}
-                </span>
+              {/* Status Indicators */}
+              <div className="flex items-center space-x-4">
+                {/* System Status */}
+                <div className="flex items-center space-x-2">
+                  <div className={`w-2 h-2 rounded-full ${
+                    systemStatus?.status === 'healthy' ? 'bg-green-500' : 'bg-red-500'
+                  } animate-pulse`}></div>
+                  <span className={`text-sm font-medium ${
+                    systemStatus?.status === 'healthy' ? 'text-green-700' : 'text-red-700'
+                  }`}>
+                    {systemStatus?.status === 'healthy' ? 'System Online' : 'System Offline'}
+                  </span>
+                </div>
+                
+                {/* WebSocket Connection Status */}
+                <ConnectionStatus />
               </div>
             </div>
 
@@ -148,7 +157,8 @@ function App() {
           </div>
         </div>
       </footer>
-    </div>
+      </div>
+    </WebSocketProvider>
   )
 }
 
