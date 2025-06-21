@@ -1,0 +1,93 @@
+version: '3.8'
+
+name: qt1-mockware
+
+services:
+  # Universal Mock AI Provider
+  mock-provider:
+    build:
+      context: ./mock-provider
+      dockerfile: Dockerfile
+    container_name: qt1-mock-provider
+    ports:
+      - "8081:8081"
+    environment:
+      - PORT=8081
+      - NODE_ENV=production
+      - RESPONSE_DELAY_MIN=100
+      - RESPONSE_DELAY_MAX=500
+      - ERROR_RATE=0.02
+      - RATE_LIMIT_MAX=1000
+      - RATE_LIMIT_WINDOW=60000
+      - TOKEN_RATE_INPUT=0.0001
+      - TOKEN_RATE_OUTPUT=0.0002
+      - ENABLE_STREAMING=true
+      - ENABLE_DETAILED_LOGGING=true
+    volumes:
+      - ./mock-provider/responses:/app/responses:ro
+      - ./logs/mock-provider:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - mockware
+
+  # Load Testing Client
+  testing-client:
+    build:
+      context: ./testing-client
+      dockerfile: Dockerfile
+    container_name: qt1-testing-client
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - DEFAULT_TARGET_URL=http://host.docker.internal:8080
+      - MOCK_PROVIDER_URL=http://mock-provider:8081
+      - MAX_CONCURRENT_TESTS=100
+      - ENABLE_DETAILED_LOGGING=true
+    volumes:
+      - ./testing-client/scenarios:/app/scenarios:ro
+      - ./logs/testing-client:/app/logs
+    depends_on:
+      mock-provider:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - mockware
+
+  # Optional: Simple monitoring dashboard
+  monitoring:
+    image: nginx:alpine
+    container_name: qt1-monitoring
+    ports:
+      - "8080:80"
+    volumes:
+      - ./monitoring:/usr/share/nginx/html:ro
+    depends_on:
+      - mock-provider
+      - testing-client
+    restart: unless-stopped
+    networks:
+      - mockware
+
+networks:
+  mockware:
+    driver: bridge
+    name: qt1-mockware-network
+
+volumes:
+  logs:
+    driver: local
+    name: qt1-mockware-logs

@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QT-1 Middleware Load Testing Client</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="nav-header">
+            <h1>🚀 QT-1 Middleware Load Testing Client</h1>
+            <a href="test-editor.html" class="editor-link">🛠 Edit Test Requests</a>
+        </div>
+        
+        <div class="info-section">
+            <p>Test your QT-1 middleware security and performance using our mock provider (no API costs!)</p>
+            <div class="info-banner">
+                <strong>💡 How it works:</strong> This tool sends test requests to <strong>your QT-1 middleware</strong> (port 8080), 
+                which should process them and forward to our mock provider (port 8081). 
+                Test your middleware's blocking capabilities, rate limiting, and performance without spending money on real API calls.
+            </div>
+        </div>
+
+        <div class="config-panel">
+            <h2>Test Configuration</h2>
+            
+            <div class="form-group">
+                <label for="testProfile">Test Profile:</label>
+                <select id="testProfile" onchange="loadProfile()">
+                    <option value="">Custom Configuration</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="testType">Test Type:</label>
+                <select id="testType" onchange="updateTestTypeOptions()">
+                    <option value="burst">Burst Test</option>
+                    <option value="sustained">Sustained Load</option>
+                    <option value="mixed">Mixed Load</option>
+                    <option value="spike">Spike Pattern</option>
+                </select>
+            </div>
+
+            <div id="burstOptions" class="test-options">
+                <div class="form-group">
+                    <label for="totalRequests">Total Requests:</label>
+                    <input type="number" id="totalRequests" value="1000" min="1" max="100000">
+                </div>
+                <div class="form-group">
+                    <label for="burstDuration">Burst Duration (seconds):</label>
+                    <input type="number" id="burstDuration" value="10" min="1" max="300">
+                </div>
+            </div>
+
+            <div id="sustainedOptions" class="test-options" style="display:none;">
+                <div class="form-group">
+                    <label for="requestsPerSecond">Requests Per Second:</label>
+                    <input type="number" id="requestsPerSecond" value="10" min="1" max="1000">
+                </div>
+                <div class="form-group">
+                    <label for="duration">Duration (seconds):</label>
+                    <input type="number" id="duration" value="60" min="1" max="3600">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Request Distribution:</label>
+                <div id="distribution" class="distribution-controls">
+                    <div class="distribution-item">
+                        <label>Clean Messages:</label>
+                        <input type="number" id="dist-clean" value="70" min="0" max="100">%
+                    </div>
+                    <div class="distribution-item">
+                        <label>Moderation (Violence):</label>
+                        <input type="number" id="dist-moderation.violence" value="10" min="0" max="100">%
+                    </div>
+                    <div class="distribution-item">
+                        <label>Injection (Direct):</label>
+                        <input type="number" id="dist-injection.direct" value="10" min="0" max="100">%
+                    </div>
+                    <div class="distribution-item">
+                        <label>PII (Email):</label>
+                        <input type="number" id="dist-pii.email" value="5" min="0" max="100">%
+                    </div>
+                    <div class="distribution-item">
+                        <label>Combination Attacks:</label>
+                        <input type="number" id="dist-combination.multiVector" value="5" min="0" max="100">%
+                    </div>
+                </div>
+                <div class="distribution-total">
+                    Total: <span id="distributionTotal">100</span>%
+                    <span id="distributionWarning" class="warning" style="display:none;">Must equal 100%</span>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="middlewareUrl">QT-1 Middleware URL:</label>
+                <input type="text" id="middlewareUrl" value="http://localhost:8080" placeholder="http://localhost:8080">
+                <small class="help-text">
+                    ✅ Use <strong>http://localhost:8080</strong> to test your QT-1 middleware<br>
+                    ❌ Don't use port 8081 (that's the mock provider - testing it directly won't validate your middleware)
+                </small>
+            </div>
+
+            <div class="button-group">
+                <button id="startTest" class="btn btn-primary" onclick="startTest()">Start Test</button>
+                <button id="stopTest" class="btn btn-danger" onclick="stopTest()" disabled>Stop Test</button>
+            </div>
+        </div>
+
+        <div class="status-panel">
+            <h2>Test Status</h2>
+            <div id="testStatus" class="status-idle">
+                <span class="status-icon">⏸</span>
+                <span class="status-text">Idle</span>
+            </div>
+            <div id="testProgress" class="progress-bar" style="display:none;">
+                <div class="progress-fill" style="width: 0%"></div>
+                <span class="progress-text">0%</span>
+            </div>
+        </div>
+
+        <div class="metrics-panel">
+            <h2>Real-Time Metrics</h2>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-value" id="totalRequestsMetric">0</div>
+                    <div class="metric-label">Total Requests</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-value" id="successRateMetric">0%</div>
+                    <div class="metric-label">Success Rate</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-value" id="rpsMetric">0</div>
+                    <div class="metric-label">Requests/Second</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-value" id="avgResponseMetric">0ms</div>
+                    <div class="metric-label">Avg Response</div>
+                </div>
+            </div>
+            
+            <div class="chart-container">
+                <canvas id="responseTimeChart"></canvas>
+            </div>
+        </div>
+
+        <div class="logs-panel">
+            <h2>Test Logs</h2>
+            <div class="log-controls">
+                <button onclick="clearLogs()">Clear Logs</button>
+                <label>
+                    <input type="checkbox" id="autoScroll" checked> Auto-scroll
+                </label>
+            </div>
+            <div id="logContainer" class="log-container"></div>
+        </div>
+
+        <div class="results-panel" id="resultsPanel" style="display:none;">
+            <h2>Test Results</h2>
+            <div id="testResults"></div>
+            <div class="button-group">
+                <button class="btn btn-secondary" onclick="downloadReport('html')">Download HTML Report</button>
+                <button class="btn btn-secondary" onclick="downloadReport('json')">Download JSON Report</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Version Information Footer -->
+    <footer class="version-footer">
+        <div class="version-info">
+            <div class="version-section">
+                <strong>🤖 QT-1 Mockware Suite</strong>
+                <div class="version-details">
+                    <span>Load Testing Client v1.0.1</span>
+                    <span id="buildDate">Built: 2025-01-21</span>
+                    <span id="connectionStatus">Mock Provider: <span class="status-indicator" id="mockProviderStatus">●</span></span>
+                </div>
+            </div>
+            <div class="version-section">
+                <strong>🔧 Components</strong>
+                <div class="version-details">
+                    <span>Testing Engine: Active</span>
+                    <span>Universal Mock: <span id="mockProviderVersion">Checking...</span></span>
+                    <span>WebSocket: <span id="websocketStatus">Connected</span></span>
+                </div>
+            </div>
+            <div class="version-section">
+                <strong>📊 System</strong>
+                <div class="version-details">
+                    <span>Browser: <span id="browserInfo"></span></span>
+                    <span>Uptime: <span id="uptimeDisplay">00:00:00</span></span>
+                    <span>Last Update: <span id="lastUpdateTime">Never</span></span>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>

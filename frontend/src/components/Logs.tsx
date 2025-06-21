@@ -12,6 +12,7 @@ interface LogEntry {
 const Logs: React.FC = () => {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     fetchLogs()
@@ -19,13 +20,26 @@ const Logs: React.FC = () => {
 
   const fetchLogs = async () => {
     try {
-      const response = await fetch('/api/logs?limit=100')
-      if (response.ok) {
-        const data = await response.json()
-        setLogs(data.data || [])
+      setLoading(true)
+      setError(null)
+      
+      const response = await fetch('/api/logs')
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      const data = await response.json()
+      
+      if (data.success && Array.isArray(data.data)) {
+        setLogs(data.data)
+      } else {
+        throw new Error(data.error || 'Invalid response format')
       }
     } catch (error) {
-      console.error('Failed to fetch logs:', error)
+      console.error('Error fetching logs:', error)
+      setError(error instanceof Error ? error.message : 'Failed to fetch logs')
+      setLogs([])
     } finally {
       setLoading(false)
     }

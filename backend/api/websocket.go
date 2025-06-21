@@ -14,14 +14,21 @@ import (
 
 // Message types constants
 const (
-	MessageTypeHealthUpdate    = "health_update"
-	MessageTypeLogEntry        = "log_entry"
-	MessageTypeConfigChange    = "config_change"
-	MessageTypeKillSwitch      = "kill_switch_update"
-	MessageTypeProviderStatus  = "provider_status"
-	MessageTypeClientMessage   = "client_message"
-	MessageTypeError           = "error"
-	MessageTypeAck             = "ack"
+	MessageTypeHealthUpdate     = "health_update"
+	MessageTypeLogEntry         = "log_entry"
+	MessageTypeConfigChange     = "config_change"
+	MessageTypeKillSwitch       = "kill_switch_update"
+	MessageTypeProviderStatus   = "provider_status"
+	MessageTypeClientMessage    = "client_message"
+	MessageTypeModerationEvent  = "moderation_event"
+	MessageTypePIIDetection     = "pii_detection"
+	MessageTypeError            = "error"
+	MessageTypeAck              = "ack"
+	MessageTypeStatus           = "status"
+	MessageTypeMetrics          = "metrics"
+	MessageTypeIPUpdate         = "ip_protection_update"
+	MessageTypeDDoSUpdate       = "ddos_update"
+	MessageTypeRuleUpdate       = "rule_update"
 )
 
 // WSMessage represents the standard WebSocket message format
@@ -44,32 +51,8 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		// Check allowed origins for security
-		origin := r.Header.Get("Origin")
-		
-		// Allow same origin
-		if origin == "" {
-			return true // Same origin requests don't have Origin header
-		}
-		
-		// For development, allow localhost origins
-		allowedOrigins := []string{
-			"http://localhost:3000",
-			"http://localhost:8080", 
-			"http://127.0.0.1:3000",
-			"http://127.0.0.1:8080",
-		}
-		
-		for _, allowed := range allowedOrigins {
-			if origin == allowed {
-				return true
-			}
-		}
-		
-		// In production, you would check against your domain
-		// return origin == "https://yourdomain.com"
-		
-		return false
+		// Allow connections from any origin for development
+		return true
 	},
 }
 
@@ -85,9 +68,10 @@ type WebSocketManager struct {
 
 // UserConnection represents an authenticated WebSocket connection
 type UserConnection struct {
-	User       *User
+	User        *User
 	ConnectedAt time.Time
 	LastSeen    time.Time
+	writeMutex  sync.Mutex // Protects writes to the WebSocket connection
 }
 
 // NewWebSocketManager creates a new WebSocket manager
@@ -180,6 +164,10 @@ func (wsm *WebSocketManager) hasPermissionForMessage(user *User, messageType str
 		return true // All authenticated users can receive acks
 	case MessageTypeError:
 		return true // All authenticated users can receive errors
+	case MessageTypeModerationEvent:
+		return true // All authenticated users can receive moderation events
+	case MessageTypePIIDetection:
+		return true // All authenticated users can receive PII detection events
 	default:
 		return user.IsAdmin // Unknown message types require admin
 	}
@@ -252,6 +240,11 @@ func (wsm *WebSocketManager) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	}
 	
 	wsm.handleAuthenticatedConnection(w, r, defaultUser)
+}
+
+// HandleAuthenticatedConnection is a public method for handling authenticated WebSocket connections
+func (wsm *WebSocketManager) HandleAuthenticatedConnection(w http.ResponseWriter, r *http.Request, user *User) {
+	wsm.handleAuthenticatedConnection(w, r, user)
 }
 
 // handleAuthenticatedConnection handles the actual WebSocket connection logic
@@ -380,22 +373,47 @@ func (wsm *WebSocketManager) startPingLoop() {
 // sendPingToAll sends ping messages to all active connections
 func (wsm *WebSocketManager) sendPingToAll() {
 	wsm.mutex.RLock()
-	connections := make([]*websocket.Conn, 0, len(wsm.connections))
-	for conn := range wsm.connections {
-		connections = append(connections, conn)
+	// Create a slice to hold connections and their user connections
+	type connInfo struct {
+		conn     *websocket.Conn
+		userConn *UserConnection
+	}
+	
+	connections := make([]connInfo, 0, len(wsm.connections))
+	for conn, userConn := range wsm.connections {
+		connections = append(connections, connInfo{conn: conn, userConn: userConn})
 	}
 	wsm.mutex.RUnlock()
-	
-	for _, conn := range connections {
-		err := conn.WriteMessage(websocket.PingMessage, []byte{})
-		if err != nil {
-			log.Printf("Error sending ping to %s: %v", conn.RemoteAddr(), err)
-			wsm.removeConnection(conn)
+
+	// Create a channel for results
+	type pingResult struct {
+		err  error
+		conn *websocket.Conn
+	}
+	results := make(chan pingResult, len(connections))
+
+	// Send pings in parallel
+	for _, ci := range connections {
+		go func(conn *websocket.Conn, userConn *UserConnection) {
+			err := userConn.safeWriteMessage(conn, websocket.PingMessage, []byte{})
+			results <- pingResult{err: err, conn: conn}
+		}(ci.conn, ci.userConn)
+	}
+
+	// Process results
+	successCount := 0
+	for range connections {
+		result := <-results
+		if result.err != nil {
+			log.Printf("Error sending ping to %s: %v", result.conn.RemoteAddr(), result.err)
+			wsm.removeConnection(result.conn)
+		} else {
+			successCount++
 		}
 	}
-	
-	if len(connections) > 0 {
-		log.Printf("Sent ping to %d connections", len(connections))
+
+	if successCount > 0 {
+		log.Printf("Sent ping to %d/%d connections", successCount, len(connections))
 	}
 }
 
@@ -416,33 +434,70 @@ func (wsm *WebSocketManager) Close() {
 	log.Printf("WebSocket manager closed")
 }
 
+// safeWriteMessage safely writes a message to a WebSocket connection using the connection's write mutex
+func (uc *UserConnection) safeWriteMessage(conn *websocket.Conn, messageType int, data []byte) error {
+	uc.writeMutex.Lock()
+	defer uc.writeMutex.Unlock()
+	return conn.WriteMessage(messageType, data)
+}
+
 // BroadcastMessage broadcasts a message to all connected clients with appropriate permissions
 func (wsm *WebSocketManager) BroadcastMessage(message WSMessage) {
+	log.Printf("🔥 BROADCASTING WebSocket message type '%s' to %d total connections", message.Type, len(wsm.connections))
+	
 	data, err := json.Marshal(message)
 	if err != nil {
-		log.Printf("Error marshaling broadcast message: %v", err)
+		log.Printf("Error marshaling message: %v", err)
 		return
 	}
-	
+
 	wsm.mutex.RLock()
-	authorizedConnections := make([]*websocket.Conn, 0, len(wsm.connections))
+	// Create a slice to hold connections and their user connections
+	type connInfo struct {
+		conn     *websocket.Conn
+		userConn *UserConnection
+	}
+	
+	authorizedConnections := make([]connInfo, 0, len(wsm.connections))
 	for conn, userConn := range wsm.connections {
-		if wsm.hasPermissionForMessage(userConn.User, message.Type) {
-			authorizedConnections = append(authorizedConnections, conn)
+		hasPermission := wsm.hasPermissionForMessage(userConn.User, message.Type)
+		log.Printf("🔍 Connection from %s, user: %s, has permission for %s: %v", 
+			conn.RemoteAddr(), userConn.User.Username, message.Type, hasPermission)
+		if hasPermission {
+			authorizedConnections = append(authorizedConnections, connInfo{conn: conn, userConn: userConn})
 		}
 	}
 	wsm.mutex.RUnlock()
 	
+	log.Printf("📡 Found %d authorized connections for message type '%s'", len(authorizedConnections), message.Type)
+
+	// Create a channel for results
+	type writeResult struct {
+		err  error
+		conn *websocket.Conn
+	}
+	writeResults := make(chan writeResult, len(authorizedConnections))
+
+	// Start a goroutine for each connection
+	for _, ci := range authorizedConnections {
+		go func(conn *websocket.Conn, userConn *UserConnection) {
+			err := userConn.safeWriteMessage(conn, websocket.TextMessage, data)
+			writeResults <- writeResult{err: err, conn: conn}
+		}(ci.conn, ci.userConn)
+	}
+
+	// Process results
 	successCount := 0
-	for _, conn := range authorizedConnections {
-		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-			log.Printf("Error broadcasting to %s: %v", conn.RemoteAddr(), err)
-			wsm.removeConnection(conn)
+	for range authorizedConnections {
+		result := <-writeResults
+		if result.err != nil {
+			log.Printf("Error broadcasting to %s: %v", result.conn.RemoteAddr(), result.err)
+			wsm.removeConnection(result.conn)
 		} else {
 			successCount++
 		}
 	}
-	
+
 	log.Printf("Broadcasted message type '%s' to %d/%d authorized connections", 
 		message.Type, successCount, len(wsm.connections))
 }

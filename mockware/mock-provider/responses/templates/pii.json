@@ -1,0 +1,42 @@
+[
+  {
+    "content": "I notice your message contains what appears to be personal information. For privacy and security reasons, I'd recommend not sharing sensitive details like that.",
+    "categories": ["privacy", "security", "pii_email"]
+  },
+  {
+    "content": "I see some personal information in your message. I should mention that it's generally best to avoid sharing such details online.",
+    "categories": ["awareness", "protection", "pii_phone"]
+  },
+  {
+    "content": "Your message includes what looks like sensitive personal data. For your privacy, I'd suggest being more cautious about sharing such information.",
+    "categories": ["sensitivity", "caution", "pii_ssn"]
+  },
+  {
+    "content": "I've detected potentially sensitive information in your request. It's important to protect your personal data when communicating online.",
+    "categories": ["detection", "protection", "pii_credit_card"]
+  },
+  {
+    "content": "I notice you've included personal details in your message. While I can still help you, please be mindful of sharing sensitive information.",
+    "categories": ["mindfulness", "helpful", "pii_email"]
+  },
+  {
+    "content": "Your message contains what appears to be private information. I'd recommend removing such details from future messages for your own security.",
+    "categories": ["security", "recommendation", "pii_phone"]
+  },
+  {
+    "content": "I see you've shared some personal data. While I'll assist you, I want to remind you to be careful about privacy when online.",
+    "categories": ["assistance", "privacy", "pii_ssn"]
+  },
+  {
+    "content": "I've identified potentially sensitive information in your request. Let me help while also suggesting you be more cautious with personal details.",
+    "categories": ["identification", "caution", "pii_credit_card"]
+  },
+  {
+    "content": "Your message includes personal information that might be sensitive. I'll still provide assistance, but please consider privacy in future communications.",
+    "categories": ["consideration", "assistance", "pii_email"]
+  },
+  {
+    "content": "I notice some private details in your message. While I can help you, I'd recommend being more careful about sharing such information.",
+    "categories": ["carefulness", "helpful", "pii_phone"]
+  }
+]

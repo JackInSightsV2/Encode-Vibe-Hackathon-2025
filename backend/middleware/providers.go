@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,11 +11,16 @@ import (
 	"time"
 
 	"qt1-middleware/config"
+	"qt1-middleware/providers"
 )
 
 // ProviderRouter handles routing requests to different AI providers
+// Supports both legacy config-based routing and new provider management system
 type ProviderRouter struct {
-	client *http.Client
+	client         *http.Client
+	providerManager *providers.ProviderManager
+	useEnhanced    bool // Whether to use enhanced provider system
+	adapter        *providers.ConfigAdapter
 }
 
 // NewProviderRouter creates a new provider router
@@ -23,7 +29,59 @@ func NewProviderRouter() *ProviderRouter {
 		client: &http.Client{
 			Timeout: 60 * time.Second,
 		},
+		adapter: providers.DefaultAdapter,
 	}
+}
+
+// NewProviderRouterWithManager creates a new provider router with enhanced provider management
+func NewProviderRouterWithManager(manager *providers.ProviderManager) *ProviderRouter {
+	return &ProviderRouter{
+		client: &http.Client{
+			Timeout: 60 * time.Second,
+		},
+		providerManager: manager,
+		useEnhanced:     true,
+		adapter:         providers.DefaultAdapter,
+	}
+}
+
+// InitializeProviders initializes the provider management system
+func (r *ProviderRouter) InitializeProviders() error {
+	if r.providerManager != nil {
+		return nil // Already initialized
+	}
+
+	// Create provider manager
+	managerConfig := &providers.ManagerConfig{
+		AutoStart:           config.AppConfig.ProviderManager.AutoStart,
+		StartTimeout:        config.AppConfig.ProviderManager.StartTimeout,
+		StopTimeout:         config.AppConfig.ProviderManager.StopTimeout,
+		HealthCheckEnabled:  config.AppConfig.ProviderManager.HealthCheckEnabled,
+		HealthCheckInterval: config.AppConfig.ProviderManager.HealthCheckInterval,
+	}
+
+	r.providerManager = providers.NewProviderManager(managerConfig)
+
+	// Load provider configurations
+	providerConfigs := r.adapter.LoadProviderConfigsFromAppConfig()
+
+	// Initialize with configurations
+	if err := r.providerManager.Initialize(providerConfigs); err != nil {
+		return fmt.Errorf("failed to initialize providers: %w", err)
+	}
+
+	// Start the provider manager if auto-start is enabled
+	if config.AppConfig.ProviderManager.AutoStart {
+		ctx, cancel := context.WithTimeout(context.Background(), config.AppConfig.ProviderManager.StartTimeout)
+		defer cancel()
+
+		if err := r.providerManager.Start(ctx); err != nil {
+			return fmt.Errorf("failed to start provider manager: %w", err)
+		}
+	}
+
+	r.useEnhanced = len(providerConfigs) > 0
+	return nil
 }
 
 // ChatRequestExtended extends the basic ChatRequest with provider/model selection
@@ -35,6 +93,13 @@ type ChatRequestExtended struct {
 	Model     string                 `json:"model,omitempty"`
 	TargetURL string                 `json:"target_url,omitempty"`
 	Settings  map[string]interface{} `json:"settings,omitempty"`
+	
+	// Additional fields for enhanced provider system
+	Messages      []map[string]string `json:"messages,omitempty"` // Simplified for compatibility
+	SystemPrompt  string              `json:"system_prompt,omitempty"`
+	MaxTokens     int                 `json:"max_tokens,omitempty"`
+	Temperature   float64             `json:"temperature,omitempty"`
+	Stream        bool                `json:"stream,omitempty"`
 }
 
 // RouteRequest determines which provider to use and routes the request
@@ -44,7 +109,7 @@ func (r *ProviderRouter) RouteRequest(req ChatRequestExtended) (*ProxyResponse, 
 		return r.routeToTargetURL(req)
 	}
 	
-	provider := r.selectProvider(req)
+	provider := r.selectLegacyProvider(req)
 	if provider == nil {
 		return nil, fmt.Errorf("no suitable provider found")
 	}
@@ -59,7 +124,7 @@ func (r *ProviderRouter) RouteRequest(req ChatRequestExtended) (*ProxyResponse, 
 	return r.makeRequestWithFallback(transformedReq, provider, req)
 }
 
-func (r *ProviderRouter) selectProvider(req ChatRequestExtended) *config.Provider {
+func (r *ProviderRouter) selectLegacyProvider(req ChatRequestExtended) *config.LegacyProvider {
 	// 1. Use explicitly specified provider
 	if req.Provider != "" {
 		if provider, ok := config.AppConfig.Providers[req.Provider]; ok {
@@ -100,7 +165,7 @@ func (r *ProviderRouter) selectProvider(req ChatRequestExtended) *config.Provide
 	return nil
 }
 
-func (r *ProviderRouter) transformRequestForProvider(req ChatRequestExtended, provider *config.Provider) ([]byte, error) {
+func (r *ProviderRouter) transformRequestForProvider(req ChatRequestExtended, provider *config.LegacyProvider) ([]byte, error) {
 	switch {
 	case strings.Contains(provider.BaseURL, "openai.com"):
 		return r.transformForOpenAI(req)
@@ -165,7 +230,7 @@ func (r *ProviderRouter) transformForAnthropic(req ChatRequestExtended) ([]byte,
 	return json.Marshal(anthropicReq)
 }
 
-func (r *ProviderRouter) makeRequestWithFallback(reqBody []byte, provider *config.Provider, originalReq ChatRequestExtended) (*ProxyResponse, error) {
+func (r *ProviderRouter) makeRequestWithFallback(reqBody []byte, provider *config.LegacyProvider, originalReq ChatRequestExtended) (*ProxyResponse, error) {
 	// Try primary provider first
 	resp, err := r.makeRequest(reqBody, provider)
 	if err == nil {
@@ -195,7 +260,7 @@ func (r *ProviderRouter) makeRequestWithFallback(reqBody []byte, provider *confi
 	return nil, fmt.Errorf("all providers failed, last error: %w", err)
 }
 
-func (r *ProviderRouter) makeRequest(reqBody []byte, provider *config.Provider) (*ProxyResponse, error) {
+func (r *ProviderRouter) makeRequest(reqBody []byte, provider *config.LegacyProvider) (*ProxyResponse, error) {
 	// Determine endpoint
 	endpoint := r.getEndpointForProvider(provider)
 	
@@ -246,7 +311,7 @@ func (r *ProviderRouter) makeRequest(reqBody []byte, provider *config.Provider) 
 	}, nil
 }
 
-func (r *ProviderRouter) getEndpointForProvider(provider *config.Provider) string {
+func (r *ProviderRouter) getEndpointForProvider(provider *config.LegacyProvider) string {
 	baseURL := strings.TrimSuffix(provider.BaseURL, "/")
 	
 	switch {
@@ -322,4 +387,153 @@ func (r *ProviderRouter) routeToTargetURL(req ChatRequestExtended) (*ProxyRespon
 		StatusCode: resp.StatusCode,
 		Body:       body,
 	}, nil
+}
+
+// convertToProviderRequest converts ChatRequestExtended to providers.ChatRequest
+func (r *ProviderRouter) convertToProviderRequest(req ChatRequestExtended) *providers.ChatRequest {
+	chatReq := &providers.ChatRequest{
+		Model:       req.Model,
+		Temperature: req.Temperature,
+		MaxTokens:   req.MaxTokens,
+		Stream:      req.Stream,
+	}
+
+	// Convert messages
+	if len(req.Messages) > 0 {
+		for _, msg := range req.Messages {
+			chatReq.Messages = append(chatReq.Messages, providers.ChatMessage{
+				Role:    msg["role"],
+				Content: msg["content"],
+			})
+		}
+	} else {
+		// Create message from simple text
+		chatReq.Messages = []providers.ChatMessage{
+			{
+				Role:    "user",
+				Content: req.Message,
+			},
+		}
+	}
+
+	// Add system prompt if provided
+	if req.SystemPrompt != "" {
+		systemMsg := providers.ChatMessage{
+			Role:    "system",
+			Content: req.SystemPrompt,
+		}
+		chatReq.Messages = append([]providers.ChatMessage{systemMsg}, chatReq.Messages...)
+	}
+
+	// Set defaults if not provided
+	if chatReq.Temperature == 0 {
+		chatReq.Temperature = 0.7
+	}
+	if chatReq.MaxTokens == 0 {
+		chatReq.MaxTokens = 2000
+	}
+
+	return chatReq
+}
+
+// convertFromProviderResponse converts providers.ChatResponse to ProxyResponse
+func (r *ProviderRouter) convertFromProviderResponse(resp *providers.ChatResponse) (*ProxyResponse, error) {
+	// Create response structure compatible with middleware expectations
+	responseData := map[string]interface{}{
+		"id":      resp.ID,
+		"model":   resp.Model,
+		"provider": resp.Provider,
+		"choices": []map[string]interface{}{
+			{
+				"message": map[string]interface{}{
+					"role":    resp.Message.Role,
+					"content": resp.Message.Content,
+				},
+				"finish_reason": resp.FinishReason,
+			},
+		},
+		"usage": map[string]interface{}{
+			"prompt_tokens":     resp.Usage.InputTokens,
+			"completion_tokens": resp.Usage.OutputTokens,
+			"total_tokens":      resp.Usage.TotalTokens,
+		},
+		"created": resp.CreatedAt.Unix(),
+		"metadata": map[string]interface{}{
+			"latency_ms": resp.Latency.Milliseconds(),
+			"cost":       resp.Cost,
+		},
+	}
+
+	body, err := json.Marshal(responseData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal response: %w", err)
+	}
+
+	return &ProxyResponse{
+		StatusCode: 200,
+		Body:       body,
+	}, nil
+}
+
+// GetProviderManager returns the provider manager (for external use)
+func (r *ProviderRouter) GetProviderManager() *providers.ProviderManager {
+	return r.providerManager
+}
+
+// IsUsingEnhancedSystem returns whether the router is using the enhanced provider system
+func (r *ProviderRouter) IsUsingEnhancedSystem() bool {
+	return r.useEnhanced && r.providerManager != nil
+}
+
+// GetProviderStatus returns status information for all providers
+func (r *ProviderRouter) GetProviderStatus() map[string]interface{} {
+	if r.IsUsingEnhancedSystem() {
+		// Use enhanced provider system
+		statusMap := r.providerManager.GetProviderStatus()
+		result := make(map[string]interface{})
+		
+		for name, status := range statusMap {
+			result[name] = map[string]interface{}{
+				"state":      string(status.State),
+				"healthy":    status.Healthy,
+				"uptime":     status.Uptime.String(),
+				"last_check": status.LastCheck.Format(time.RFC3339),
+				"error":      status.Error,
+				"version":    status.Version,
+			}
+		}
+		
+		return result
+	} else {
+		// Use legacy system
+		return r.GetAvailableProviders()
+	}
+}
+
+// GetProviderMetrics returns metrics for all providers
+func (r *ProviderRouter) GetProviderMetrics() map[string]interface{} {
+	if r.IsUsingEnhancedSystem() {
+		metricsMap := r.providerManager.GetProviderMetrics()
+		result := make(map[string]interface{})
+		
+		for name, metrics := range metricsMap {
+			result[name] = map[string]interface{}{
+				"request_count":       metrics.RequestCount,
+				"success_count":       metrics.SuccessCount,
+				"error_count":         metrics.ErrorCount,
+				"average_latency_ms":  metrics.AverageLatency.Milliseconds(),
+				"requests_per_second": metrics.RequestsPerSecond,
+				"total_cost":          metrics.TotalCost,
+				"tokens_used":         metrics.TokensUsed,
+				"rate_limit_hits":     metrics.RateLimitHits,
+			}
+		}
+		
+		return result
+	} else {
+		// Legacy system doesn't have detailed metrics
+		return map[string]interface{}{
+			"message": "Metrics not available in legacy mode",
+		}
+	}
 }

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useState, ReactNode, useRef } from 'react';
 import { ConnectionStatus, WSMessage, webSocketService } from '../services/websocket';
 
 interface WebSocketContextType {
@@ -85,13 +85,29 @@ export const useWebSocket = (): WebSocketContextType => {
 // Hook for specific message types
 export const useWebSocketMessage = (
   messageType: string,
-  handler: (data: any) => void
+  handler: (data: any, message?: WSMessage) => void
 ) => {
   const { lastMessage } = useWebSocket();
+  const handlerRef = useRef(handler);
+  const lastProcessedRef = useRef<string | null>(null);
+  
+  // Keep handler ref up to date
+  useEffect(() => {
+    handlerRef.current = handler;
+  }, [handler]);
 
   useEffect(() => {
     if (lastMessage && lastMessage.type === messageType) {
-      handler(lastMessage.data);
+      // Create a unique identifier for this message to prevent duplicate processing
+      const messageId = `${lastMessage.timestamp}-${lastMessage.type}-${JSON.stringify(lastMessage.data)}`;
+      
+      if (lastProcessedRef.current !== messageId) {
+        console.log(`🔄 Processing new ${messageType} message:`, messageId);
+        lastProcessedRef.current = messageId;
+        handlerRef.current(lastMessage.data, lastMessage);
+      } else {
+        console.log(`⏭️ Skipping duplicate ${messageType} message:`, messageId);
+      }
     }
-  }, [lastMessage, messageType, handler]);
+  }, [lastMessage, messageType]);
 };

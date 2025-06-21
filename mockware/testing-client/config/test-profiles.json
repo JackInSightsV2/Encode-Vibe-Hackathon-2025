@@ -1,0 +1,176 @@
+{
+  "profiles": {
+    "quick-test": {
+      "name": "Quick Test",
+      "description": "Quick 30-second test with basic scenarios",
+      "testType": "sustained",
+      "duration": 30,
+      "requestsPerSecond": 10,
+      "distribution": {
+        "clean": 60,
+        "moderation.violence": 20,
+        "injection.direct": 10,
+        "pii.email": 10
+      }
+    },
+    "aggressive-security": {
+      "name": "Aggressive Security Test",
+      "description": "High-intensity security testing with various attack vectors",
+      "testType": "mixed",
+      "totalRequests": 5000,
+      "requestsPerSecond": 50,
+      "distribution": {
+        "clean": 20,
+        "moderation.violence": 15,
+        "moderation.hateSpeech": 10,
+        "injection.direct": 15,
+        "injection.encoded": 10,
+        "injection.sophisticated": 10,
+        "pii.mixed": 10,
+        "combination.multiVector": 10
+      }
+    },
+    "standard-load": {
+      "name": "Standard Load Test",
+      "description": "Standard load test simulating normal traffic patterns",
+      "testType": "sustained",
+      "duration": 300,
+      "requestsPerSecond": 50,
+      "distribution": {
+        "clean": 70,
+        "moderation.violence": 10,
+        "moderation.hateSpeech": 5,
+        "injection.direct": 5,
+        "pii.email": 5,
+        "relevance.offTopic": 5
+      }
+    },
+    "burst-test": {
+      "name": "Burst Test",
+      "description": "Test middleware's ability to handle traffic bursts",
+      "testType": "burst",
+      "totalRequests": 1000,
+      "duration": 10,
+      "distribution": {
+        "clean": 50,
+        "moderation.violence": 20,
+        "injection.direct": 20,
+        "ddos.rapidFire": 10
+      }
+    },
+    "ddos-simulation": {
+      "name": "DDoS Simulation",
+      "description": "Simulate various DDoS attack patterns",
+      "testType": "spike",
+      "spikePattern": [
+        {
+          "duration": 30,
+          "requestsPerSecond": 10,
+          "description": "Normal traffic"
+        },
+        {
+          "duration": 10,
+          "requestsPerSecond": 500,
+          "description": "Spike attack"
+        },
+        {
+          "duration": 60,
+          "requestsPerSecond": 20,
+          "description": "Recovery period"
+        },
+        {
+          "duration": 5,
+          "requestsPerSecond": 1000,
+          "description": "Massive spike"
+        },
+        {
+          "duration": 30,
+          "requestsPerSecond": 10,
+          "description": "Return to normal"
+        }
+      ],
+      "distribution": {
+        "clean": 30,
+        "ddos.largePayload": 20,
+        "ddos.rapidFire": 20,
+        "ddos.cacheBuster": 20,
+        "ddos.resourceExhaustion": 10
+      }
+    },
+    "pii-detection": {
+      "name": "PII Detection Test",
+      "description": "Comprehensive PII detection testing",
+      "testType": "mixed",
+      "totalRequests": 2000,
+      "requestsPerSecond": 20,
+      "distribution": {
+        "clean": 40,
+        "pii.email": 15,
+        "pii.phone": 15,
+        "pii.ssn": 10,
+        "pii.creditCard": 10,
+        "pii.mixed": 10
+      }
+    },
+    "injection-comprehensive": {
+      "name": "Comprehensive Injection Test",
+      "description": "Test all types of prompt injection attempts",
+      "testType": "mixed",
+      "totalRequests": 3000,
+      "requestsPerSecond": 30,
+      "distribution": {
+        "clean": 25,
+        "injection.direct": 20,
+        "injection.encoded": 15,
+        "injection.sophisticated": 15,
+        "injection.creative": 10,
+        "injection.multilingual": 5,
+        "combination.contextSwitching": 10
+      }
+    },
+    "edge-cases": {
+      "name": "Edge Case Testing",
+      "description": "Test unusual inputs and edge cases",
+      "testType": "mixed",
+      "totalRequests": 1500,
+      "requestsPerSecond": 15,
+      "distribution": {
+        "clean": 30,
+        "edgeCase.unicodeAbuse": 20,
+        "edgeCase.boundaryTesting": 15,
+        "edgeCase.parsingAttacks": 15,
+        "edgeCase.semanticTricks": 10,
+        "edgeCase.polyglotAttacks": 10
+      }
+    },
+    "endurance": {
+      "name": "Endurance Test",
+      "description": "Long-running test to check for memory leaks and degradation",
+      "testType": "sustained",
+      "duration": 3600,
+      "requestsPerSecond": 10,
+      "distribution": {
+        "clean": 80,
+        "moderation.violence": 5,
+        "injection.direct": 5,
+        "pii.email": 5,
+        "relevance.offTopic": 5
+      }
+    },
+    "combination-attacks": {
+      "name": "Combination Attack Test",
+      "description": "Test multi-vector attacks and obfuscation techniques",
+      "testType": "mixed",
+      "totalRequests": 2500,
+      "requestsPerSecond": 25,
+      "distribution": {
+        "clean": 30,
+        "combination.piiAndInjection": 15,
+        "combination.violenceAndMisspelling": 15,
+        "combination.hateAndEncoding": 10,
+        "combination.multiVector": 15,
+        "combination.obfuscationMix": 15
+      }
+    }
+  }
+}

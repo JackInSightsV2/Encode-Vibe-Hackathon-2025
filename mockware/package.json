@@ -1,0 +1,54 @@
+{
+  "name": "qt1-mockware",
+  "version": "1.0.0",
+  "description": "Complete QT-1 Middleware Testing Suite - Load Testing Client + Universal Mock AI Provider",
+  "scripts": {
+    "start": "./start-mockware.sh",
+    "start:windows": "start-mockware.bat",
+    "stop": "./start-mockware.sh stop",
+    "restart": "./start-mockware.sh restart",
+    "status": "./start-mockware.sh status",
+    "logs": "./start-mockware.sh logs",
+    "install:all": "cd testing-client && npm install && cd ../mock-provider && npm install",
+    "test:provider": "cd mock-provider && npm test",
+    "test:client": "cd testing-client && npm test",
+    "test:all": "npm run test:provider && npm run test:client",
+    "clean": "rm -rf testing-client/node_modules mock-provider/node_modules logs .mockware-pids",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f",
+    "docker:build": "docker build -t qt1-mockware .",
+    "docker:run": "docker run -d -p 3000:3000 -p 8081:8081 --name qt1-mockware qt1-mockware",
+    "docker:stop": "docker stop qt1-mockware && docker rm qt1-mockware",
+    "docker:unified": "docker build -t qt1-mockware . && docker run -d -p 3000:3000 -p 8081:8081 --name qt1-mockware qt1-mockware"
+  },
+  "keywords": [
+    "qt1",
+    "middleware",
+    "testing",
+    "mock",
+    "ai-provider",
+    "load-testing",
+    "openai",
+    "anthropic",
+    "simulation"
+  ],
+  "author": "",
+  "license": "ISC",
+  "workspaces": [
+    "testing-client",
+    "mock-provider"
+  ],
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-org/qt1-mockware.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-org/qt1-mockware/issues"
+  },
+  "homepage": "https://github.com/your-org/qt1-mockware#readme"
+}

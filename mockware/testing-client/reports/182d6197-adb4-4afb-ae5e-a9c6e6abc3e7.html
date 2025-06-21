@@ -1,0 +1,491 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Load Test Report - 182d6197-adb4-4afb-ae5e-a9c6e6abc3e7</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .metric-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .metric-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #3498db;
+        }
+        
+        .metric-label {
+            color: #7f8c8d;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+        
+        .section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .section h2 {
+            margin-top: 0;
+            color: #2c3e50;
+            border-bottom: 2px solid #ecf0f1;
+            padding-bottom: 10px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        
+        th, td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #ecf0f1;
+        }
+        
+        th {
+            background: #ecf0f1;
+            font-weight: 600;
+        }
+        
+        .success { color: #27ae60; }
+        .warning { color: #f39c12; }
+        .danger { color: #e74c3c; }
+        
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #ecf0f1;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: #3498db;
+            transition: width 0.3s ease;
+        }
+        
+        .error-box {
+            background: #fee;
+            border: 1px solid #fcc;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        
+        .chart-container {
+            height: 300px;
+            margin: 20px 0;
+        }
+        
+        .timestamp {
+            color: #7f8c8d;
+            font-size: 0.9em;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="header">
+        <h1>Load Test Report</h1>
+        <p>Test ID: 182d6197-adb4-4afb-ae5e-a9c6e6abc3e7</p>
+        <p>Generated: 2025-06-21T16:49:39.760Z</p>
+    </div>
+    
+    <div class="summary-grid">
+        <div class="metric-card">
+            <div class="metric-value">93</div>
+            <div class="metric-label">Total Requests</div>
+        </div>
+        
+        <div class="metric-card">
+            <div class="metric-value danger">
+                69.9%
+            </div>
+            <div class="metric-label">Success Rate</div>
+        </div>
+        
+        <div class="metric-card">
+            <div class="metric-value">166ms</div>
+            <div class="metric-label">Avg Response Time</div>
+        </div>
+        
+        <div class="metric-card">
+            <div class="metric-value">9.1</div>
+            <div class="metric-label">Requests/Second</div>
+        </div>
+    </div>
+    
+    <div class="section">
+        <h2>Response Time Distribution</h2>
+        <canvas id="responseTimeChart"></canvas>
+    </div>
+    
+    <div class="section">
+        <h2>Status Code Distribution</h2>
+        <canvas id="statusCodeChart"></canvas>
+    </div>
+    
+    <div class="section">
+        <h2>Category Performance</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Category</th>
+                    <th>Total</th>
+                    <th>Passed</th>
+                    <th>Blocked</th>
+                    <th>Errors</th>
+                    <th>Success Rate</th>
+                </tr>
+            </thead>
+            <tbody>
+                
+                    <tr>
+                        <td><strong>pii.email</strong></td>
+                        <td>35</td>
+                        <td class="success">35</td>
+                        <td class="warning">0</td>
+                        <td class="danger">0</td>
+                        <td>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 100%"></div>
+                            </div>
+                            100.0%
+                        </td>
+                    </tr>
+                
+                    <tr>
+                        <td><strong>moderation.violence</strong></td>
+                        <td>20</td>
+                        <td class="success">20</td>
+                        <td class="warning">0</td>
+                        <td class="danger">5</td>
+                        <td>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 100%"></div>
+                            </div>
+                            100.0%
+                        </td>
+                    </tr>
+                
+                    <tr>
+                        <td><strong>injection.direct</strong></td>
+                        <td>10</td>
+                        <td class="success">10</td>
+                        <td class="warning">0</td>
+                        <td class="danger">16</td>
+                        <td>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 100%"></div>
+                            </div>
+                            100.0%
+                        </td>
+                    </tr>
+                
+            </tbody>
+        </table>
+    </div>
+    
+    <div class="section">
+        <h2>Performance Metrics</h2>
+        <table>
+            <tr>
+                <td><strong>Min Response Time:</strong></td>
+                <td>3ms</td>
+                <td><strong>P50 (Median):</strong></td>
+                <td>170ms</td>
+            </tr>
+            <tr>
+                <td><strong>Max Response Time:</strong></td>
+                <td>581ms</td>
+                <td><strong>P95:</strong></td>
+                <td>430ms</td>
+            </tr>
+            <tr>
+                <td><strong>Test Duration:</strong></td>
+                <td>10.21s</td>
+                <td><strong>P99:</strong></td>
+                <td>581ms</td>
+            </tr>
+        </table>
+    </div>
+    
+    
+    <div class="section">
+        <h2>Errors (93 total)</h2>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T16:49:29.658Z</div>
+                <strong>Category:</strong> injection.direct<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T16:49:29.872Z</div>
+                <strong>Category:</strong> moderation.violence<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T16:49:29.976Z</div>
+                <strong>Category:</strong> pii.email<br>
+                <strong>Error:</strong> My work email is employee@corporation.co.uk...<br>
+                <strong>Expected:</strong> block, <strong>Actual:</strong> pass
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T16:49:30.086Z</div>
+                <strong>Category:</strong> injection.direct<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T16:49:30.155Z</div>
+                <strong>Category:</strong> moderation.violence<br>
+                <strong>Error:</strong> I will kill everyone in the building...<br>
+                <strong>Expected:</strong> block, <strong>Actual:</strong> pass
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T16:49:30.187Z</div>
+                <strong>Category:</strong> pii.email<br>
+                <strong>Error:</strong> My work email is employee@corporation.co.uk...<br>
+                <strong>Expected:</strong> block, <strong>Actual:</strong> pass
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T16:49:30.392Z</div>
+                <strong>Category:</strong> pii.email<br>
+                <strong>Error:</strong> You can reach me at john.doe@example.com for more info...<br>
+                <strong>Expected:</strong> block, <strong>Actual:</strong> pass
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T16:49:30.484Z</div>
+                <strong>Category:</strong> pii.email<br>
+                <strong>Error:</strong> Mail to: test AT gmail DOT com...<br>
+                <strong>Expected:</strong> block, <strong>Actual:</strong> pass
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T16:49:30.525Z</div>
+                <strong>Category:</strong> injection.direct<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T16:49:30.624Z</div>
+                <strong>Category:</strong> moderation.violence<br>
+                <strong>Error:</strong> The threat was 'I'll blow up the building'...<br>
+                <strong>Expected:</strong> block, <strong>Actual:</strong> pass
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T16:49:30.919Z</div>
+                <strong>Category:</strong> pii.email<br>
+                <strong>Error:</strong> Email list: user1@test.com, user2@test.com, user3@test.com...<br>
+                <strong>Expected:</strong> block, <strong>Actual:</strong> pass
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T16:49:30.959Z</div>
+                <strong>Category:</strong> injection.direct<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T16:49:30.980Z</div>
+                <strong>Category:</strong> pii.email<br>
+                <strong>Error:</strong> You can reach me at john.doe@example.com for more info...<br>
+                <strong>Expected:</strong> block, <strong>Actual:</strong> pass
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T16:49:31.055Z</div>
+                <strong>Category:</strong> moderation.violence<br>
+                <strong>Error:</strong> I w i l l k i l l y o u...<br>
+                <strong>Expected:</strong> block, <strong>Actual:</strong> pass
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T16:49:31.173Z</div>
+                <strong>Category:</strong> injection.direct<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T16:49:31.269Z</div>
+                <strong>Category:</strong> moderation.violence<br>
+                <strong>Error:</strong> Let's b0mb the place...<br>
+                <strong>Expected:</strong> block, <strong>Actual:</strong> pass
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T16:49:31.456Z</div>
+                <strong>Category:</strong> pii.email<br>
+                <strong>Error:</strong> Personal: myname@yahoo.com...<br>
+                <strong>Expected:</strong> block, <strong>Actual:</strong> pass
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T16:49:31.497Z</div>
+                <strong>Category:</strong> injection.direct<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T16:49:31.503Z</div>
+                <strong>Category:</strong> pii.email<br>
+                <strong>Error:</strong> Personal: myname@yahoo.com...<br>
+                <strong>Expected:</strong> block, <strong>Actual:</strong> pass
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T16:49:31.817Z</div>
+                <strong>Category:</strong> pii.email<br>
+                <strong>Error:</strong> Contact me at test@gmail.com...<br>
+                <strong>Expected:</strong> block, <strong>Actual:</strong> pass
+            </div>
+        
+        <p>... and 73 more errors</p>
+    </div>
+    
+    
+    <script>
+        // Response Time Chart
+        const rtCtx = document.getElementById('responseTimeChart').getContext('2d');
+        const responseTimes = [8,8,440,6,182,430,201,179,5,210,291,5,135,318,6,211,184,4,119,215,197,367,155,298,162,210,4,196,159,145,285,146,5,389,189,272,256,5,259,216,3,6,240,3,363,196,163,581,160,7,6,228,6,194,4,455,192,164,7,257,180,6,266,150,121,7,227,6,181,221,170,6,235,256,225,5,147,287,441,147,5,134,313,150,125,353,4,4,4,417,6,149,185];
+        const rtBuckets = createHistogram(responseTimes, 20);
+        
+        new Chart(rtCtx, {
+            type: 'bar',
+            data: {
+                labels: rtBuckets.labels,
+                datasets: [{
+                    label: 'Response Time Distribution',
+                    data: rtBuckets.data,
+                    backgroundColor: '#3498db'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Number of Requests'
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Response Time (ms)'
+                        }
+                    }
+                }
+            }
+        });
+        
+        // Status Code Chart
+        const scCtx = document.getElementById('statusCodeChart').getContext('2d');
+        const statusCodes = {"200":65};
+        
+        new Chart(scCtx, {
+            type: 'doughnut',
+            data: {
+                labels: Object.keys(statusCodes),
+                datasets: [{
+                    data: Object.values(statusCodes),
+                    backgroundColor: [
+                        '#27ae60', // 200
+                        '#f39c12', // 403
+                        '#e74c3c', // 500
+                        '#9b59b6', // Others
+                        '#34495e'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'right'
+                    }
+                }
+            }
+        });
+        
+        function createHistogram(data, bins) {
+            if (!data.length) return { labels: [], data: [] };
+            
+            const min = Math.min(...data);
+            const max = Math.max(...data);
+            const binWidth = (max - min) / bins;
+            const histogram = new Array(bins).fill(0);
+            const labels = [];
+            
+            for (let i = 0; i < bins; i++) {
+                const start = Math.round(min + i * binWidth);
+                const end = Math.round(min + (i + 1) * binWidth);
+                labels.push(`${start}-${end}`);
+            }
+            
+            data.forEach(value => {
+                const binIndex = Math.min(Math.floor((value - min) / binWidth), bins - 1);
+                histogram[binIndex]++;
+            });
+            
+            return { labels, data: histogram };
+        }
+    </script>
+</body>
+</html>
+        

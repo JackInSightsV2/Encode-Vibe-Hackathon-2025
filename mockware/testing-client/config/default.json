@@ -1,0 +1,30 @@
+{
+  "server": {
+    "port": 3001,
+    "host": "localhost"
+  },
+  "middleware": {
+    "url": "http://localhost:8080",
+    "timeout": 30000
+  },
+  "mockProvider": {
+    "url": "http://localhost:8081"
+  },
+  "loadTesting": {
+    "maxConcurrentRequests": 1000,
+    "defaultRequestsPerSecond": 10,
+    "defaultDuration": 60,
+    "defaultDistribution": {
+      "clean": 70,
+      "moderation.violence": 10,
+      "injection.direct": 10,
+      "pii.email": 5,
+      "combination.multiVector": 5
+    }
+  },
+  "reporting": {
+    "outputDir": "./reports",
+    "formats": ["console", "html", "json"],
+    "retentionDays": 7
+  }
+}

@@ -1,0 +1,519 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Load Test Report - 8ae9bb08-c8d6-4929-80ad-7e1c08acd2ff</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .metric-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .metric-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #3498db;
+        }
+        
+        .metric-label {
+            color: #7f8c8d;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+        
+        .section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .section h2 {
+            margin-top: 0;
+            color: #2c3e50;
+            border-bottom: 2px solid #ecf0f1;
+            padding-bottom: 10px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        
+        th, td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #ecf0f1;
+        }
+        
+        th {
+            background: #ecf0f1;
+            font-weight: 600;
+        }
+        
+        .success { color: #27ae60; }
+        .warning { color: #f39c12; }
+        .danger { color: #e74c3c; }
+        
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #ecf0f1;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: #3498db;
+            transition: width 0.3s ease;
+        }
+        
+        .error-box {
+            background: #fee;
+            border: 1px solid #fcc;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        
+        .chart-container {
+            height: 300px;
+            margin: 20px 0;
+        }
+        
+        .timestamp {
+            color: #7f8c8d;
+            font-size: 0.9em;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="header">
+        <h1>Load Test Report</h1>
+        <p>Test ID: 8ae9bb08-c8d6-4929-80ad-7e1c08acd2ff</p>
+        <p>Generated: 2025-06-21T15:36:39.309Z</p>
+    </div>
+    
+    <div class="summary-grid">
+        <div class="metric-card">
+            <div class="metric-value">500</div>
+            <div class="metric-label">Total Requests</div>
+        </div>
+        
+        <div class="metric-card">
+            <div class="metric-value danger">
+                57.4%
+            </div>
+            <div class="metric-label">Success Rate</div>
+        </div>
+        
+        <div class="metric-card">
+            <div class="metric-value">4493ms</div>
+            <div class="metric-label">Avg Response Time</div>
+        </div>
+        
+        <div class="metric-card">
+            <div class="metric-value">47.3</div>
+            <div class="metric-label">Requests/Second</div>
+        </div>
+    </div>
+    
+    <div class="section">
+        <h2>Response Time Distribution</h2>
+        <canvas id="responseTimeChart"></canvas>
+    </div>
+    
+    <div class="section">
+        <h2>Status Code Distribution</h2>
+        <canvas id="statusCodeChart"></canvas>
+    </div>
+    
+    <div class="section">
+        <h2>Category Performance</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Category</th>
+                    <th>Total</th>
+                    <th>Passed</th>
+                    <th>Blocked</th>
+                    <th>Errors</th>
+                    <th>Success Rate</th>
+                </tr>
+            </thead>
+            <tbody>
+                
+                    <tr>
+                        <td><strong>clean</strong></td>
+                        <td>214</td>
+                        <td class="success">214</td>
+                        <td class="warning">0</td>
+                        <td class="danger">0</td>
+                        <td>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 100%"></div>
+                            </div>
+                            100.0%
+                        </td>
+                    </tr>
+                
+                    <tr>
+                        <td><strong>injection.direct</strong></td>
+                        <td>20</td>
+                        <td class="success">20</td>
+                        <td class="warning">0</td>
+                        <td class="danger">0</td>
+                        <td>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 100%"></div>
+                            </div>
+                            100.0%
+                        </td>
+                    </tr>
+                
+                    <tr>
+                        <td><strong>pii.email</strong></td>
+                        <td>15</td>
+                        <td class="success">15</td>
+                        <td class="warning">0</td>
+                        <td class="danger">0</td>
+                        <td>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 100%"></div>
+                            </div>
+                            100.0%
+                        </td>
+                    </tr>
+                
+                    <tr>
+                        <td><strong>moderation.violence</strong></td>
+                        <td>28</td>
+                        <td class="success">28</td>
+                        <td class="warning">0</td>
+                        <td class="danger">2</td>
+                        <td>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 100%"></div>
+                            </div>
+                            100.0%
+                        </td>
+                    </tr>
+                
+                    <tr>
+                        <td><strong>combination.multiVector</strong></td>
+                        <td>10</td>
+                        <td class="success">10</td>
+                        <td class="warning">0</td>
+                        <td class="danger">0</td>
+                        <td>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 100%"></div>
+                            </div>
+                            100.0%
+                        </td>
+                    </tr>
+                
+            </tbody>
+        </table>
+    </div>
+    
+    <div class="section">
+        <h2>Performance Metrics</h2>
+        <table>
+            <tr>
+                <td><strong>Min Response Time:</strong></td>
+                <td>582ms</td>
+                <td><strong>P50 (Median):</strong></td>
+                <td>3641ms</td>
+            </tr>
+            <tr>
+                <td><strong>Max Response Time:</strong></td>
+                <td>10439ms</td>
+                <td><strong>P95:</strong></td>
+                <td>10101ms</td>
+            </tr>
+            <tr>
+                <td><strong>Test Duration:</strong></td>
+                <td>10.58s</td>
+                <td><strong>P99:</strong></td>
+                <td>10344ms</td>
+            </tr>
+        </table>
+    </div>
+    
+    
+    <div class="section">
+        <h2>Errors (286 total)</h2>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:36:29.489Z</div>
+                <strong>Category:</strong> moderation.violence<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:36:29.539Z</div>
+                <strong>Category:</strong> injection.direct<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:36:29.556Z</div>
+                <strong>Category:</strong> injection.direct<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:36:29.570Z</div>
+                <strong>Category:</strong> injection.direct<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:36:29.573Z</div>
+                <strong>Category:</strong> moderation.violence<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:36:29.578Z</div>
+                <strong>Category:</strong> injection.direct<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:36:29.601Z</div>
+                <strong>Category:</strong> moderation.violence<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:36:29.616Z</div>
+                <strong>Category:</strong> moderation.violence<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:36:29.621Z</div>
+                <strong>Category:</strong> moderation.violence<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:36:29.631Z</div>
+                <strong>Category:</strong> injection.direct<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:36:29.643Z</div>
+                <strong>Category:</strong> combination.multiVector<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:36:29.647Z</div>
+                <strong>Category:</strong> injection.direct<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:36:29.651Z</div>
+                <strong>Category:</strong> combination.multiVector<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:36:29.656Z</div>
+                <strong>Category:</strong> injection.direct<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:36:29.662Z</div>
+                <strong>Category:</strong> moderation.violence<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:36:29.673Z</div>
+                <strong>Category:</strong> combination.multiVector<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:36:29.687Z</div>
+                <strong>Category:</strong> injection.direct<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:36:29.701Z</div>
+                <strong>Category:</strong> combination.multiVector<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:36:29.708Z</div>
+                <strong>Category:</strong> moderation.violence<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:36:29.753Z</div>
+                <strong>Category:</strong> injection.direct<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+        <p>... and 266 more errors</p>
+    </div>
+    
+    
+    <script>
+        // Response Time Chart
+        const rtCtx = document.getElementById('responseTimeChart').getContext('2d');
+        const responseTimes = [769,819,838,775,758,759,726,875,601,858,722,582,906,821,721,920,805,801,806,981,939,720,719,855,878,963,814,817,954,819,959,1046,1028,812,959,1053,941,1048,1115,1124,942,958,1058,1197,1140,955,950,964,962,1090,975,973,959,964,988,988,979,1312,1122,987,1136,994,1254,1002,1045,1142,1341,1024,1155,1388,1166,1068,1173,1171,1165,1175,1166,1165,1183,1181,1447,1185,1173,1182,1174,1307,1335,1197,1520,1192,1179,1177,1234,1334,1514,1556,1435,1308,1357,1348,1356,1521,1459,1498,1270,1368,1608,1469,1537,1326,1375,1376,1346,1660,1340,1487,1360,1485,1341,1460,1572,1490,1470,1655,1722,1480,1480,1485,1487,1466,1481,1472,1473,1783,1467,1538,1468,1467,1594,1766,1568,1587,1609,1576,1562,1550,1832,1541,1597,1576,1703,1553,1703,1762,1694,1563,1646,1617,1635,1919,1851,1651,1622,1913,1848,1913,1630,1942,1751,1772,1745,1876,2001,1859,1948,1841,1722,1815,1708,1705,1989,1910,1890,1893,1878,1779,1833,1857,2098,1857,1817,1832,1801,1882,1802,1960,1904,1847,1989,2117,1988,1934,1900,1883,1892,1826,1856,1951,2031,1861,2172,2301,2393,2165,2523,2262,2453,2256,2312,2264,2444,2444,2333,2652,2363,2671,2611,2682,2408,2763,2754,2823,3164,3064,3066,3283,3349,3265,3380,3457,3429,3309,3600,3608,3567,3584,3640,3663,3651,3664,3652,3641,3623,3742,3537,3422,3771,3780,3771,3748,3814,3869,3834,3653,4133,4261,4220,4215,4204,4377,4383,4285,4384,4175,4251,4232,4513,4578,4419,4557,4630,4404,4555,4463,4682,4658,4497,4694,4599,4605,4699,4698,4686,4779,4588,4722,4843,4782,4820,4902,5004,5097,5117,5277,5113,5101,5389,5332,5508,5451,5490,5439,5523,5570,5587,5647,5452,5659,5576,5535,5589,5614,5515,5641,5712,5960,5911,6129,5967,6240,6318,6322,6272,6237,6273,6390,6268,6435,6243,6398,6392,6430,6281,6358,6344,6440,6447,6619,6310,6625,6734,6817,6889,6931,6873,7026,6933,7085,7201,7221,7319,7142,7391,7463,7287,7430,7447,7361,7619,7406,7653,7377,7514,7612,7565,7559,7716,7461,7691,7487,7795,7635,7782,7647,7612,7541,7806,7661,7856,7900,8019,8085,8110,8195,8031,8304,8311,8136,8226,8414,8387,8471,8368,8494,8386,8676,8685,8605,8402,8573,8636,8565,8580,8697,8479,8483,8490,8943,8807,8895,9085,8798,8968,8907,9187,8995,9197,9214,9275,9278,9343,9123,9248,9289,9293,9285,9384,9273,9363,9611,9459,9702,9654,9642,9519,9543,9517,9805,9733,9701,9637,9796,9687,9836,9696,9876,9720,9779,9793,9810,9905,9773,9915,9889,9782,9923,10022,9863,10057,10038,10053,9973,10041,10121,10172,10203,10072,9983,10137,10101,10283,10115,10344,10236,10185,10206,10268,10264,10190,10163,10189,10345,10318,10198,10323,10424,10353,10439,10240,10255];
+        const rtBuckets = createHistogram(responseTimes, 20);
+        
+        new Chart(rtCtx, {
+            type: 'bar',
+            data: {
+                labels: rtBuckets.labels,
+                datasets: [{
+                    label: 'Response Time Distribution',
+                    data: rtBuckets.data,
+                    backgroundColor: '#3498db'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Number of Requests'
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Response Time (ms)'
+                        }
+                    }
+                }
+            }
+        });
+        
+        // Status Code Chart
+        const scCtx = document.getElementById('statusCodeChart').getContext('2d');
+        const statusCodes = {"200":287};
+        
+        new Chart(scCtx, {
+            type: 'doughnut',
+            data: {
+                labels: Object.keys(statusCodes),
+                datasets: [{
+                    data: Object.values(statusCodes),
+                    backgroundColor: [
+                        '#27ae60', // 200
+                        '#f39c12', // 403
+                        '#e74c3c', // 500
+                        '#9b59b6', // Others
+                        '#34495e'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'right'
+                    }
+                }
+            }
+        });
+        
+        function createHistogram(data, bins) {
+            if (!data.length) return { labels: [], data: [] };
+            
+            const min = Math.min(...data);
+            const max = Math.max(...data);
+            const binWidth = (max - min) / bins;
+            const histogram = new Array(bins).fill(0);
+            const labels = [];
+            
+            for (let i = 0; i < bins; i++) {
+                const start = Math.round(min + i * binWidth);
+                const end = Math.round(min + (i + 1) * binWidth);
+                labels.push(`${start}-${end}`);
+            }
+            
+            data.forEach(value => {
+                const binIndex = Math.min(Math.floor((value - min) / binWidth), bins - 1);
+                histogram[binIndex]++;
+            });
+            
+            return { labels, data: histogram };
+        }
+    </script>
+</body>
+</html>
+        

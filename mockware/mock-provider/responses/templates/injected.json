@@ -1,0 +1,42 @@
+[
+  {
+    "content": "I notice you're trying to change how I operate, but I'm designed to maintain consistent behavior and follow my guidelines.",
+    "categories": ["consistency", "design", "injection_direct"]
+  },
+  {
+    "content": "I understand you might be testing my responses, but I'll continue to operate within my intended parameters.",
+    "categories": ["testing", "parameters", "injection_system"]
+  },
+  {
+    "content": "I see what appears to be an attempt to modify my behavior. I'll stick to my original programming and guidelines.",
+    "categories": ["modification", "programming", "injection_hypothetical"]
+  },
+  {
+    "content": "Your message seems to contain instructions aimed at changing my responses. I'll maintain my standard approach to helping you.",
+    "categories": ["instructions", "standard", "injection_direct"]
+  },
+  {
+    "content": "I detect what might be an attempt to override my normal operation. I'll continue following my designed behavior patterns.",
+    "categories": ["override", "behavior", "injection_system"]
+  },
+  {
+    "content": "It looks like you're trying to get me to act differently than intended. I'll keep providing helpful responses within my guidelines.",
+    "categories": ["intention", "helpful", "injection_hypothetical"]
+  },
+  {
+    "content": "I notice your request contains elements that might be testing my boundaries. I'll respond according to my standard protocols.",
+    "categories": ["boundaries", "protocols", "injection_direct"]
+  },
+  {
+    "content": "Your message appears to include instructions for changing my behavior. I'll maintain my consistent approach to assistance.",
+    "categories": ["consistency", "assistance", "injection_system"]
+  },
+  {
+    "content": "I can see what looks like an attempt to modify how I respond. I'll continue operating as designed to provide helpful information.",
+    "categories": ["modification", "designed", "injection_hypothetical"]
+  },
+  {
+    "content": "It seems you might be testing my response patterns. I'll keep following my programming to be helpful, harmless, and honest.",
+    "categories": ["programming", "principles", "injection_direct"]
+  }
+]

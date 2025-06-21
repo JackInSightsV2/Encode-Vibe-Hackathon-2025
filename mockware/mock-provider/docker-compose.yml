@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  mock-provider:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: qt1-mock-provider
+    ports:
+      - "8081:8081"
+    environment:
+      - PORT=8081
+      - NODE_ENV=production
+      - RESPONSE_DELAY_MIN=100
+      - RESPONSE_DELAY_MAX=500
+      - ERROR_RATE=0.02
+      - RATE_LIMIT_MAX=1000
+      - RATE_LIMIT_WINDOW=60000
+      - TOKEN_RATE_INPUT=0.0001
+      - TOKEN_RATE_OUTPUT=0.0002
+      - ENABLE_STREAMING=true
+      - ENABLE_DETAILED_LOGGING=true
+    volumes:
+      - ./responses:/app/responses:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - mockware-network
+
+  # Optional: Add a simple web dashboard
+  dashboard:
+    image: nginx:alpine
+    container_name: qt1-dashboard
+    ports:
+      - "8080:80"
+    volumes:
+      - ./dashboard:/usr/share/nginx/html:ro
+    depends_on:
+      - mock-provider
+    networks:
+      - mockware-network
+
+networks:
+  mockware-network:
+    driver: bridge
+
+volumes:
+  mock-data:
+    driver: local

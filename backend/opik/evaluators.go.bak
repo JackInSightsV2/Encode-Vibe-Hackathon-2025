@@ -1,0 +1,914 @@
+package opik
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"math"
+	"sync"
+	"time"
+)
+
+// EvaluatorType represents different types of evaluators
+type EvaluatorType string
+
+const (
+	EvaluatorTypeAccuracy     EvaluatorType = "accuracy"
+	EvaluatorTypePrecision    EvaluatorType = "precision"
+	EvaluatorTypeRecall       EvaluatorType = "recall"
+	EvaluatorTypeF1Score      EvaluatorType = "f1_score"
+	EvaluatorTypeLatency      EvaluatorType = "latency"
+	EvaluatorTypeThroughput   EvaluatorType = "throughput"
+	EvaluatorTypeFalsePositive EvaluatorType = "false_positive_rate"
+	EvaluatorTypeCustom       EvaluatorType = "custom"
+)
+
+// EvaluationResult represents the result of an evaluation
+type EvaluationResult struct {
+	EvaluatorName string                 `json:"evaluator_name"`
+	EvaluatorType EvaluatorType          `json:"evaluator_type"`
+	Score         float64                `json:"score"`
+	Passed        bool                   `json:"passed"`
+	Threshold     float64                `json:"threshold,omitempty"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+	Timestamp     time.Time              `json:"timestamp"`
+	TraceID       string                 `json:"trace_id,omitempty"`
+	SpanID        string                 `json:"span_id,omitempty"`
+}
+
+// EvaluationContext provides context for evaluations
+type EvaluationContext struct {
+	TraceID   string                 `json:"trace_id"`
+	SpanID    string                 `json:"span_id"`
+	Input     string                 `json:"input"`
+	Output    string                 `json:"output"`
+	Expected  string                 `json:"expected,omitempty"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	StartTime time.Time              `json:"start_time"`
+	EndTime   time.Time              `json:"end_time"`
+}
+
+// SafetyEvaluator interface for custom safety evaluators (renamed to avoid conflict)
+type SafetyEvaluator interface {
+	Name() string
+	Type() EvaluatorType
+	Evaluate(ctx context.Context, evalCtx *EvaluationContext) (*EvaluationResult, error)
+	Configure(config map[string]interface{}) error
+}
+
+// EvaluatorRegistry manages registered evaluators
+type EvaluatorRegistry struct {
+	evaluators map[string]SafetyEvaluator
+	mu         sync.RWMutex
+}
+
+// NewEvaluatorRegistry creates a new evaluator registry
+func NewEvaluatorRegistry() *EvaluatorRegistry {
+	registry := &EvaluatorRegistry{
+		evaluators: make(map[string]SafetyEvaluator),
+	}
+	
+	// Register built-in evaluators
+	registry.registerBuiltinEvaluators()
+	
+	return registry
+}
+
+// Register adds an evaluator to the registry
+func (er *EvaluatorRegistry) Register(evaluator SafetyEvaluator) error {
+	er.mu.Lock()
+	defer er.mu.Unlock()
+	
+	name := evaluator.Name()
+	if _, exists := er.evaluators[name]; exists {
+		return fmt.Errorf("evaluator '%s' already registered", name)
+	}
+	
+	er.evaluators[name] = evaluator
+	return nil
+}
+
+// Get retrieves an evaluator by name
+func (er *EvaluatorRegistry) Get(name string) (SafetyEvaluator, error) {
+	er.mu.RLock()
+	defer er.mu.RUnlock()
+	
+	evaluator, exists := er.evaluators[name]
+	if !exists {
+		return nil, fmt.Errorf("evaluator '%s' not found", name)
+	}
+	
+	return evaluator, nil
+}
+
+// List returns all registered evaluator names
+func (er *EvaluatorRegistry) List() []string {
+	er.mu.RLock()
+	defer er.mu.RUnlock()
+	
+	names := make([]string, 0, len(er.evaluators))
+	for name := range er.evaluators {
+		names = append(names, name)
+	}
+	
+	return names
+}
+
+// EvaluateAll runs all registered evaluators on the given context
+func (er *EvaluatorRegistry) EvaluateAll(ctx context.Context, evalCtx *EvaluationContext) ([]*EvaluationResult, error) {
+	er.mu.RLock()
+	evaluators := make([]Evaluator, 0, len(er.evaluators))
+	for _, evaluator := range er.evaluators {
+		evaluators = append(evaluators, evaluator)
+	}
+	er.mu.RUnlock()
+	
+	results := make([]*EvaluationResult, 0, len(evaluators))
+	errors := make([]error, 0)
+	
+	// Run evaluations in parallel
+	resultChan := make(chan *EvaluationResult, len(evaluators))
+	errorChan := make(chan error, len(evaluators))
+	
+	for _, evaluator := range evaluators {
+		go func(eval Evaluator) {
+			result, err := eval.Evaluate(ctx, evalCtx)
+			if err != nil {
+				errorChan <- fmt.Errorf("evaluator '%s' failed: %w", eval.Name(), err)
+				return
+			}
+			resultChan <- result
+		}(evaluator)
+	}
+	
+	// Collect results
+	for i := 0; i < len(evaluators); i++ {
+		select {
+		case result := <-resultChan:
+			results = append(results, result)
+		case err := <-errorChan:
+			errors = append(errors, err)
+		case <-ctx.Done():
+			return results, ctx.Err()
+		}
+	}
+	
+	if len(errors) > 0 {
+		return results, fmt.Errorf("evaluation errors: %v", errors)
+	}
+	
+	return results, nil
+}
+
+// Register built-in evaluators
+func (er *EvaluatorRegistry) registerBuiltinEvaluators() {
+	er.evaluators["moderation_accuracy"] = &ModerationAccuracyEvaluator{}
+	er.evaluators["moderation_precision"] = &ModerationPrecisionEvaluator{}
+	er.evaluators["moderation_latency"] = &ModerationLatencyEvaluator{}
+	er.evaluators["false_positive_rate"] = &FalsePositiveRateEvaluator{}
+	er.evaluators["threat_detection_recall"] = &ThreatDetectionRecallEvaluator{}
+	er.evaluators["pii_detection_f1"] = &PIIDetectionF1Evaluator{}
+	er.evaluators["provider_reliability"] = &ProviderReliabilityEvaluator{}
+}
+
+// Built-in Evaluators
+
+// ModerationAccuracyEvaluator measures moderation accuracy
+type ModerationAccuracyEvaluator struct {
+	threshold float64
+}
+
+func (e *ModerationAccuracyEvaluator) Name() string { return "moderation_accuracy" }
+func (e *ModerationAccuracyEvaluator) Type() EvaluatorType { return EvaluatorTypeAccuracy }
+
+func (e *ModerationAccuracyEvaluator) Configure(config map[string]interface{}) error {
+	if threshold, ok := config["threshold"].(float64); ok {
+		e.threshold = threshold
+	} else {
+		e.threshold = 0.95 // Default 95% accuracy threshold
+	}
+	return nil
+}
+
+func (e *ModerationAccuracyEvaluator) Evaluate(ctx context.Context, evalCtx *EvaluationContext) (*EvaluationResult, error) {
+	// Extract moderation results from metadata
+	moderationResult, ok := evalCtx.Metadata["moderation_result"]
+	if !ok {
+		return nil, fmt.Errorf("moderation_result not found in metadata")
+	}
+	
+	expectedResult, ok := evalCtx.Metadata["expected_moderation"]
+	if !ok {
+		return nil, fmt.Errorf("expected_moderation not found in metadata")
+	}
+	
+	// Calculate accuracy based on whether the moderation decision was correct
+	var score float64
+	actualBlocked := getBoolFromInterface(moderationResult, "blocked")
+	expectedBlocked := getBoolFromInterface(expectedResult, "blocked")
+	
+	if actualBlocked == expectedBlocked {
+		score = 1.0
+	} else {
+		score = 0.0
+	}
+	
+	return &EvaluationResult{
+		EvaluatorName: e.Name(),
+		EvaluatorType: e.Type(),
+		Score:         score,
+		Passed:        score >= e.threshold,
+		Threshold:     e.threshold,
+		Metadata: map[string]interface{}{
+			"actual_blocked":   actualBlocked,
+			"expected_blocked": expectedBlocked,
+		},
+		Timestamp: time.Now(),
+		TraceID:   evalCtx.TraceID,
+		SpanID:    evalCtx.SpanID,
+	}, nil
+}
+
+// ModerationPrecisionEvaluator measures precision of threat detection
+type ModerationPrecisionEvaluator struct {
+	threshold float64
+	window    time.Duration
+	results   []bool
+	mu        sync.Mutex
+}
+
+func (e *ModerationPrecisionEvaluator) Name() string { return "moderation_precision" }
+func (e *ModerationPrecisionEvaluator) Type() EvaluatorType { return EvaluatorTypePrecision }
+
+func (e *ModerationPrecisionEvaluator) Configure(config map[string]interface{}) error {
+	if threshold, ok := config["threshold"].(float64); ok {
+		e.threshold = threshold
+	} else {
+		e.threshold = 0.90
+	}
+	
+	if windowStr, ok := config["window"].(string); ok {
+		if window, err := time.ParseDuration(windowStr); err == nil {
+			e.window = window
+		}
+	} else {
+		e.window = 1 * time.Hour
+	}
+	
+	e.results = make([]bool, 0)
+	return nil
+}
+
+func (e *ModerationPrecisionEvaluator) Evaluate(ctx context.Context, evalCtx *EvaluationContext) (*EvaluationResult, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	
+	// Extract results
+	moderationResult, ok := evalCtx.Metadata["moderation_result"]
+	if !ok {
+		return nil, fmt.Errorf("moderation_result not found in metadata")
+	}
+	
+	actualBlocked := getBoolFromInterface(moderationResult, "blocked")
+	
+	if actualBlocked {
+		// Only evaluate precision for positive predictions
+		expectedResult, ok := evalCtx.Metadata["expected_moderation"]
+		if !ok {
+			return nil, fmt.Errorf("expected_moderation not found in metadata")
+		}
+		
+		expectedBlocked := getBoolFromInterface(expectedResult, "blocked")
+		e.results = append(e.results, expectedBlocked) // True positive if expected is true
+		
+		// Keep only recent results
+		cutoff := time.Now().Add(-e.window)
+		// This is simplified - in practice you'd want to store timestamps too
+		if len(e.results) > 100 {
+			e.results = e.results[len(e.results)-100:]
+		}
+	}
+	
+	// Calculate precision: TP / (TP + FP)
+	if len(e.results) == 0 {
+		return &EvaluationResult{
+			EvaluatorName: e.Name(),
+			EvaluatorType: e.Type(),
+			Score:         1.0, // No false positives yet
+			Passed:        true,
+			Threshold:     e.threshold,
+			Metadata: map[string]interface{}{
+				"true_positives":  0,
+				"false_positives": 0,
+				"sample_count":    0,
+			},
+			Timestamp: time.Now(),
+			TraceID:   evalCtx.TraceID,
+			SpanID:    evalCtx.SpanID,
+		}, nil
+	}
+	
+	truePositives := 0
+	for _, correct := range e.results {
+		if correct {
+			truePositives++
+		}
+	}
+	
+	precision := float64(truePositives) / float64(len(e.results))
+	
+	return &EvaluationResult{
+		EvaluatorName: e.Name(),
+		EvaluatorType: e.Type(),
+		Score:         precision,
+		Passed:        precision >= e.threshold,
+		Threshold:     e.threshold,
+		Metadata: map[string]interface{}{
+			"true_positives":  truePositives,
+			"false_positives": len(e.results) - truePositives,
+			"sample_count":    len(e.results),
+		},
+		Timestamp: time.Now(),
+		TraceID:   evalCtx.TraceID,
+		SpanID:    evalCtx.SpanID,
+	}, nil
+}
+
+// ModerationLatencyEvaluator measures moderation response time
+type ModerationLatencyEvaluator struct {
+	threshold time.Duration
+}
+
+func (e *ModerationLatencyEvaluator) Name() string { return "moderation_latency" }
+func (e *ModerationLatencyEvaluator) Type() EvaluatorType { return EvaluatorTypeLatency }
+
+func (e *ModerationLatencyEvaluator) Configure(config map[string]interface{}) error {
+	if thresholdStr, ok := config["threshold"].(string); ok {
+		if threshold, err := time.ParseDuration(thresholdStr); err == nil {
+			e.threshold = threshold
+		}
+	} else {
+		e.threshold = 500 * time.Millisecond
+	}
+	return nil
+}
+
+func (e *ModerationLatencyEvaluator) Evaluate(ctx context.Context, evalCtx *EvaluationContext) (*EvaluationResult, error) {
+	latency := evalCtx.EndTime.Sub(evalCtx.StartTime)
+	latencyMs := float64(latency.Nanoseconds()) / 1e6
+	thresholdMs := float64(e.threshold.Nanoseconds()) / 1e6
+	
+	// Score is inverse of latency (lower latency = higher score)
+	score := math.Max(0, 1.0 - (latencyMs / (thresholdMs * 2)))
+	
+	return &EvaluationResult{
+		EvaluatorName: e.Name(),
+		EvaluatorType: e.Type(),
+		Score:         score,
+		Passed:        latency <= e.threshold,
+		Threshold:     thresholdMs,
+		Metadata: map[string]interface{}{
+			"latency_ms":   latencyMs,
+			"threshold_ms": thresholdMs,
+		},
+		Timestamp: time.Now(),
+		TraceID:   evalCtx.TraceID,
+		SpanID:    evalCtx.SpanID,
+	}, nil
+}
+
+// FalsePositiveRateEvaluator measures false positive rate
+type FalsePositiveRateEvaluator struct {
+	threshold    float64
+	window       time.Duration
+	samples      []sampleResult
+	mu           sync.Mutex
+}
+
+type sampleResult struct {
+	timestamp time.Time
+	actual    bool
+	expected  bool
+}
+
+func (e *FalsePositiveRateEvaluator) Name() string { return "false_positive_rate" }
+func (e *FalsePositiveRateEvaluator) Type() EvaluatorType { return EvaluatorTypeFalsePositive }
+
+func (e *FalsePositiveRateEvaluator) Configure(config map[string]interface{}) error {
+	if threshold, ok := config["threshold"].(float64); ok {
+		e.threshold = threshold
+	} else {
+		e.threshold = 0.05 // 5% false positive rate threshold
+	}
+	
+	if windowStr, ok := config["window"].(string); ok {
+		if window, err := time.ParseDuration(windowStr); err == nil {
+			e.window = window
+		}
+	} else {
+		e.window = 1 * time.Hour
+	}
+	
+	e.samples = make([]sampleResult, 0)
+	return nil
+}
+
+func (e *FalsePositiveRateEvaluator) Evaluate(ctx context.Context, evalCtx *EvaluationContext) (*EvaluationResult, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	
+	// Extract results
+	moderationResult, ok := evalCtx.Metadata["moderation_result"]
+	if !ok {
+		return nil, fmt.Errorf("moderation_result not found in metadata")
+	}
+	
+	expectedResult, ok := evalCtx.Metadata["expected_moderation"]
+	if !ok {
+		return nil, fmt.Errorf("expected_moderation not found in metadata")
+	}
+	
+	actualBlocked := getBoolFromInterface(moderationResult, "blocked")
+	expectedBlocked := getBoolFromInterface(expectedResult, "blocked")
+	
+	// Add sample
+	e.samples = append(e.samples, sampleResult{
+		timestamp: time.Now(),
+		actual:    actualBlocked,
+		expected:  expectedBlocked,
+	})
+	
+	// Clean old samples
+	cutoff := time.Now().Add(-e.window)
+	validSamples := make([]sampleResult, 0)
+	for _, sample := range e.samples {
+		if sample.timestamp.After(cutoff) {
+			validSamples = append(validSamples, sample)
+		}
+	}
+	e.samples = validSamples
+	
+	// Calculate false positive rate: FP / (FP + TN)
+	falsePositives := 0
+	trueNegatives := 0
+	
+	for _, sample := range e.samples {
+		if sample.actual && !sample.expected {
+			falsePositives++
+		} else if !sample.actual && !sample.expected {
+			trueNegatives++
+		}
+	}
+	
+	var fpr float64
+	if falsePositives+trueNegatives > 0 {
+		fpr = float64(falsePositives) / float64(falsePositives+trueNegatives)
+	}
+	
+	return &EvaluationResult{
+		EvaluatorName: e.Name(),
+		EvaluatorType: e.Type(),
+		Score:         1.0 - fpr, // Score is inverse of FPR
+		Passed:        fpr <= e.threshold,
+		Threshold:     e.threshold,
+		Metadata: map[string]interface{}{
+			"false_positive_rate": fpr,
+			"false_positives":     falsePositives,
+			"true_negatives":      trueNegatives,
+			"sample_count":        len(e.samples),
+		},
+		Timestamp: time.Now(),
+		TraceID:   evalCtx.TraceID,
+		SpanID:    evalCtx.SpanID,
+	}, nil
+}
+
+// ThreatDetectionRecallEvaluator measures recall for threat detection
+type ThreatDetectionRecallEvaluator struct {
+	threshold float64
+	window    time.Duration
+	samples   []sampleResult
+	mu        sync.Mutex
+}
+
+func (e *ThreatDetectionRecallEvaluator) Name() string { return "threat_detection_recall" }
+func (e *ThreatDetectionRecallEvaluator) Type() EvaluatorType { return EvaluatorTypeRecall }
+
+func (e *ThreatDetectionRecallEvaluator) Configure(config map[string]interface{}) error {
+	if threshold, ok := config["threshold"].(float64); ok {
+		e.threshold = threshold
+	} else {
+		e.threshold = 0.95 // 95% recall threshold
+	}
+	
+	if windowStr, ok := config["window"].(string); ok {
+		if window, err := time.ParseDuration(windowStr); err == nil {
+			e.window = window
+		}
+	} else {
+		e.window = 1 * time.Hour
+	}
+	
+	e.samples = make([]sampleResult, 0)
+	return nil
+}
+
+func (e *ThreatDetectionRecallEvaluator) Evaluate(ctx context.Context, evalCtx *EvaluationContext) (*EvaluationResult, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	
+	// Extract results
+	moderationResult, ok := evalCtx.Metadata["moderation_result"]
+	if !ok {
+		return nil, fmt.Errorf("moderation_result not found in metadata")
+	}
+	
+	expectedResult, ok := evalCtx.Metadata["expected_moderation"]
+	if !ok {
+		return nil, fmt.Errorf("expected_moderation not found in metadata")
+	}
+	
+	actualBlocked := getBoolFromInterface(moderationResult, "blocked")
+	expectedBlocked := getBoolFromInterface(expectedResult, "blocked")
+	
+	// Only consider cases where we expected a threat
+	if expectedBlocked {
+		e.samples = append(e.samples, sampleResult{
+			timestamp: time.Now(),
+			actual:    actualBlocked,
+			expected:  expectedBlocked,
+		})
+		
+		// Clean old samples
+		cutoff := time.Now().Add(-e.window)
+		validSamples := make([]sampleResult, 0)
+		for _, sample := range e.samples {
+			if sample.timestamp.After(cutoff) {
+				validSamples = append(validSamples, sample)
+			}
+		}
+		e.samples = validSamples
+	}
+	
+	// Calculate recall: TP / (TP + FN)
+	if len(e.samples) == 0 {
+		return &EvaluationResult{
+			EvaluatorName: e.Name(),
+			EvaluatorType: e.Type(),
+			Score:         1.0,
+			Passed:        true,
+			Threshold:     e.threshold,
+			Metadata: map[string]interface{}{
+				"true_positives":  0,
+				"false_negatives": 0,
+				"sample_count":    0,
+			},
+			Timestamp: time.Now(),
+			TraceID:   evalCtx.TraceID,
+			SpanID:    evalCtx.SpanID,
+		}, nil
+	}
+	
+	truePositives := 0
+	for _, sample := range e.samples {
+		if sample.actual && sample.expected {
+			truePositives++
+		}
+	}
+	
+	recall := float64(truePositives) / float64(len(e.samples))
+	
+	return &EvaluationResult{
+		EvaluatorName: e.Name(),
+		EvaluatorType: e.Type(),
+		Score:         recall,
+		Passed:        recall >= e.threshold,
+		Threshold:     e.threshold,
+		Metadata: map[string]interface{}{
+			"recall":              recall,
+			"true_positives":      truePositives,
+			"false_negatives":     len(e.samples) - truePositives,
+			"sample_count":        len(e.samples),
+		},
+		Timestamp: time.Now(),
+		TraceID:   evalCtx.TraceID,
+		SpanID:    evalCtx.SpanID,
+	}, nil
+}
+
+// PIIDetectionF1Evaluator measures F1 score for PII detection
+type PIIDetectionF1Evaluator struct {
+	threshold   float64
+	window      time.Duration
+	samples     []sampleResult
+	mu          sync.Mutex
+}
+
+func (e *PIIDetectionF1Evaluator) Name() string { return "pii_detection_f1" }
+func (e *PIIDetectionF1Evaluator) Type() EvaluatorType { return EvaluatorTypeF1Score }
+
+func (e *PIIDetectionF1Evaluator) Configure(config map[string]interface{}) error {
+	if threshold, ok := config["threshold"].(float64); ok {
+		e.threshold = threshold
+	} else {
+		e.threshold = 0.90 // 90% F1 score threshold
+	}
+	
+	if windowStr, ok := config["window"].(string); ok {
+		if window, err := time.ParseDuration(windowStr); err == nil {
+			e.window = window
+		}
+	} else {
+		e.window = 1 * time.Hour
+	}
+	
+	e.samples = make([]sampleResult, 0)
+	return nil
+}
+
+func (e *PIIDetectionF1Evaluator) Evaluate(ctx context.Context, evalCtx *EvaluationContext) (*EvaluationResult, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	
+	// Extract PII detection results
+	piiResult, ok := evalCtx.Metadata["pii_result"]
+	if !ok {
+		return nil, fmt.Errorf("pii_result not found in metadata")
+	}
+	
+	expectedPII, ok := evalCtx.Metadata["expected_pii"]
+	if !ok {
+		return nil, fmt.Errorf("expected_pii not found in metadata")
+	}
+	
+	actualDetected := getBoolFromInterface(piiResult, "detected")
+	expectedDetected := getBoolFromInterface(expectedPII, "detected")
+	
+	// Add sample
+	e.samples = append(e.samples, sampleResult{
+		timestamp: time.Now(),
+		actual:    actualDetected,
+		expected:  expectedDetected,
+	})
+	
+	// Clean old samples
+	cutoff := time.Now().Add(-e.window)
+	validSamples := make([]sampleResult, 0)
+	for _, sample := range e.samples {
+		if sample.timestamp.After(cutoff) {
+			validSamples = append(validSamples, sample)
+		}
+	}
+	e.samples = validSamples
+	
+	// Calculate precision, recall, and F1
+	truePositives := 0
+	falsePositives := 0
+	falseNegatives := 0
+	
+	for _, sample := range e.samples {
+		if sample.actual && sample.expected {
+			truePositives++
+		} else if sample.actual && !sample.expected {
+			falsePositives++
+		} else if !sample.actual && sample.expected {
+			falseNegatives++
+		}
+	}
+	
+	var precision, recall, f1 float64
+	
+	if truePositives+falsePositives > 0 {
+		precision = float64(truePositives) / float64(truePositives+falsePositives)
+	}
+	
+	if truePositives+falseNegatives > 0 {
+		recall = float64(truePositives) / float64(truePositives+falseNegatives)
+	}
+	
+	if precision+recall > 0 {
+		f1 = 2 * (precision * recall) / (precision + recall)
+	}
+	
+	return &EvaluationResult{
+		EvaluatorName: e.Name(),
+		EvaluatorType: e.Type(),
+		Score:         f1,
+		Passed:        f1 >= e.threshold,
+		Threshold:     e.threshold,
+		Metadata: map[string]interface{}{
+			"f1_score":         f1,
+			"precision":        precision,
+			"recall":           recall,
+			"true_positives":   truePositives,
+			"false_positives":  falsePositives,
+			"false_negatives":  falseNegatives,
+			"sample_count":     len(e.samples),
+		},
+		Timestamp: time.Now(),
+		TraceID:   evalCtx.TraceID,
+		SpanID:    evalCtx.SpanID,
+	}, nil
+}
+
+// ProviderReliabilityEvaluator measures provider reliability
+type ProviderReliabilityEvaluator struct {
+	threshold float64
+	window    time.Duration
+	requests  map[string][]providerRequest
+	mu        sync.Mutex
+}
+
+type providerRequest struct {
+	timestamp time.Time
+	success   bool
+	latency   time.Duration
+}
+
+func (e *ProviderReliabilityEvaluator) Name() string { return "provider_reliability" }
+func (e *ProviderReliabilityEvaluator) Type() EvaluatorType { return EvaluatorTypeCustom }
+
+func (e *ProviderReliabilityEvaluator) Configure(config map[string]interface{}) error {
+	if threshold, ok := config["threshold"].(float64); ok {
+		e.threshold = threshold
+	} else {
+		e.threshold = 0.99 // 99% reliability threshold
+	}
+	
+	if windowStr, ok := config["window"].(string); ok {
+		if window, err := time.ParseDuration(windowStr); err == nil {
+			e.window = window
+		}
+	} else {
+		e.window = 1 * time.Hour
+	}
+	
+	e.requests = make(map[string][]providerRequest)
+	return nil
+}
+
+func (e *ProviderReliabilityEvaluator) Evaluate(ctx context.Context, evalCtx *EvaluationContext) (*EvaluationResult, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	
+	// Extract provider information
+	provider, ok := evalCtx.Metadata["provider"].(string)
+	if !ok {
+		return nil, fmt.Errorf("provider not found in metadata")
+	}
+	
+	success := true
+	if errorInterface, exists := evalCtx.Metadata["error"]; exists && errorInterface != nil {
+		success = false
+	}
+	
+	// Add request record
+	if e.requests[provider] == nil {
+		e.requests[provider] = make([]providerRequest, 0)
+	}
+	
+	e.requests[provider] = append(e.requests[provider], providerRequest{
+		timestamp: time.Now(),
+		success:   success,
+		latency:   evalCtx.EndTime.Sub(evalCtx.StartTime),
+	})
+	
+	// Clean old requests
+	cutoff := time.Now().Add(-e.window)
+	validRequests := make([]providerRequest, 0)
+	for _, req := range e.requests[provider] {
+		if req.timestamp.After(cutoff) {
+			validRequests = append(validRequests, req)
+		}
+	}
+	e.requests[provider] = validRequests
+	
+	// Calculate reliability
+	if len(validRequests) == 0 {
+		return &EvaluationResult{
+			EvaluatorName: e.Name(),
+			EvaluatorType: e.Type(),
+			Score:         1.0,
+			Passed:        true,
+			Threshold:     e.threshold,
+			Metadata: map[string]interface{}{
+				"provider":       provider,
+				"success_count":  0,
+				"total_requests": 0,
+			},
+			Timestamp: time.Now(),
+			TraceID:   evalCtx.TraceID,
+			SpanID:    evalCtx.SpanID,
+		}, nil
+	}
+	
+	successCount := 0
+	totalLatency := time.Duration(0)
+	
+	for _, req := range validRequests {
+		if req.success {
+			successCount++
+		}
+		totalLatency += req.latency
+	}
+	
+	reliability := float64(successCount) / float64(len(validRequests))
+	avgLatency := totalLatency / time.Duration(len(validRequests))
+	
+	return &EvaluationResult{
+		EvaluatorName: e.Name(),
+		EvaluatorType: e.Type(),
+		Score:         reliability,
+		Passed:        reliability >= e.threshold,
+		Threshold:     e.threshold,
+		Metadata: map[string]interface{}{
+			"provider":         provider,
+			"reliability":      reliability,
+			"success_count":    successCount,
+			"total_requests":   len(validRequests),
+			"avg_latency_ms":   float64(avgLatency.Nanoseconds()) / 1e6,
+		},
+		Timestamp: time.Now(),
+		TraceID:   evalCtx.TraceID,
+		SpanID:    evalCtx.SpanID,
+	}, nil
+}
+
+// Helper functions
+
+func getBoolFromInterface(data interface{}, key string) bool {
+	if dataMap, ok := data.(map[string]interface{}); ok {
+		if value, exists := dataMap[key]; exists {
+			if boolValue, ok := value.(bool); ok {
+				return boolValue
+			}
+		}
+	}
+	return false
+}
+
+// EvaluationBatch represents a batch of evaluations
+type EvaluationBatch struct {
+	BatchID   string                `json:"batch_id"`
+	Results   []*EvaluationResult   `json:"results"`
+	Summary   *EvaluationSummary    `json:"summary"`
+	Timestamp time.Time             `json:"timestamp"`
+}
+
+// EvaluationSummary provides summary statistics for a batch of evaluations
+type EvaluationSummary struct {
+	TotalEvaluations int                            `json:"total_evaluations"`
+	PassedCount      int                            `json:"passed_count"`
+	FailedCount      int                            `json:"failed_count"`
+	AverageScore     float64                        `json:"average_score"`
+	ScoresByType     map[EvaluatorType]float64      `json:"scores_by_type"`
+	Metadata         map[string]interface{}         `json:"metadata,omitempty"`
+}
+
+// CreateEvaluationBatch creates a batch evaluation summary
+func CreateEvaluationBatch(results []*EvaluationResult) *EvaluationBatch {
+	batchID := fmt.Sprintf("batch_%d_%s", time.Now().Unix(), generateRandomString(8))
+	
+	summary := &EvaluationSummary{
+		TotalEvaluations: len(results),
+		ScoresByType:     make(map[EvaluatorType]float64),
+	}
+	
+	totalScore := 0.0
+	typeScores := make(map[EvaluatorType][]float64)
+	
+	for _, result := range results {
+		totalScore += result.Score
+		
+		if result.Passed {
+			summary.PassedCount++
+		} else {
+			summary.FailedCount++
+		}
+		
+		if typeScores[result.EvaluatorType] == nil {
+			typeScores[result.EvaluatorType] = make([]float64, 0)
+		}
+		typeScores[result.EvaluatorType] = append(typeScores[result.EvaluatorType], result.Score)
+	}
+	
+	if len(results) > 0 {
+		summary.AverageScore = totalScore / float64(len(results))
+	}
+	
+	// Calculate average scores by type
+	for evalType, scores := range typeScores {
+		typeTotal := 0.0
+		for _, score := range scores {
+			typeTotal += score
+		}
+		summary.ScoresByType[evalType] = typeTotal / float64(len(scores))
+	}
+	
+	return &EvaluationBatch{
+		BatchID:   batchID,
+		Results:   results,
+		Summary:   summary,
+		Timestamp: time.Now(),
+	}
+}

@@ -1,0 +1,491 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Load Test Report - eee34ea7-208d-4daa-a512-76072b663af9</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .metric-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .metric-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #3498db;
+        }
+        
+        .metric-label {
+            color: #7f8c8d;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+        
+        .section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .section h2 {
+            margin-top: 0;
+            color: #2c3e50;
+            border-bottom: 2px solid #ecf0f1;
+            padding-bottom: 10px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        
+        th, td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #ecf0f1;
+        }
+        
+        th {
+            background: #ecf0f1;
+            font-weight: 600;
+        }
+        
+        .success { color: #27ae60; }
+        .warning { color: #f39c12; }
+        .danger { color: #e74c3c; }
+        
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #ecf0f1;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: #3498db;
+            transition: width 0.3s ease;
+        }
+        
+        .error-box {
+            background: #fee;
+            border: 1px solid #fcc;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        
+        .chart-container {
+            height: 300px;
+            margin: 20px 0;
+        }
+        
+        .timestamp {
+            color: #7f8c8d;
+            font-size: 0.9em;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="header">
+        <h1>Load Test Report</h1>
+        <p>Test ID: eee34ea7-208d-4daa-a512-76072b663af9</p>
+        <p>Generated: 2025-06-21T15:34:37.209Z</p>
+    </div>
+    
+    <div class="summary-grid">
+        <div class="metric-card">
+            <div class="metric-value">1,000</div>
+            <div class="metric-label">Total Requests</div>
+        </div>
+        
+        <div class="metric-card">
+            <div class="metric-value danger">
+                2.6%
+            </div>
+            <div class="metric-label">Success Rate</div>
+        </div>
+        
+        <div class="metric-card">
+            <div class="metric-value">2676ms</div>
+            <div class="metric-label">Avg Response Time</div>
+        </div>
+        
+        <div class="metric-card">
+            <div class="metric-value">234.8</div>
+            <div class="metric-label">Requests/Second</div>
+        </div>
+    </div>
+    
+    <div class="section">
+        <h2>Response Time Distribution</h2>
+        <canvas id="responseTimeChart"></canvas>
+    </div>
+    
+    <div class="section">
+        <h2>Status Code Distribution</h2>
+        <canvas id="statusCodeChart"></canvas>
+    </div>
+    
+    <div class="section">
+        <h2>Category Performance</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Category</th>
+                    <th>Total</th>
+                    <th>Passed</th>
+                    <th>Blocked</th>
+                    <th>Errors</th>
+                    <th>Success Rate</th>
+                </tr>
+            </thead>
+            <tbody>
+                
+                    <tr>
+                        <td><strong>clean</strong></td>
+                        <td>22</td>
+                        <td class="success">22</td>
+                        <td class="warning">0</td>
+                        <td class="danger">0</td>
+                        <td>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 100%"></div>
+                            </div>
+                            100.0%
+                        </td>
+                    </tr>
+                
+                    <tr>
+                        <td><strong>combination.multiVector</strong></td>
+                        <td>2</td>
+                        <td class="success">2</td>
+                        <td class="warning">0</td>
+                        <td class="danger">0</td>
+                        <td>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 100%"></div>
+                            </div>
+                            100.0%
+                        </td>
+                    </tr>
+                
+                    <tr>
+                        <td><strong>injection.direct</strong></td>
+                        <td>2</td>
+                        <td class="success">2</td>
+                        <td class="warning">0</td>
+                        <td class="danger">0</td>
+                        <td>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 100%"></div>
+                            </div>
+                            100.0%
+                        </td>
+                    </tr>
+                
+            </tbody>
+        </table>
+    </div>
+    
+    <div class="section">
+        <h2>Performance Metrics</h2>
+        <table>
+            <tr>
+                <td><strong>Min Response Time:</strong></td>
+                <td>1042ms</td>
+                <td><strong>P50 (Median):</strong></td>
+                <td>2783ms</td>
+            </tr>
+            <tr>
+                <td><strong>Max Response Time:</strong></td>
+                <td>4201ms</td>
+                <td><strong>P95:</strong></td>
+                <td>3316ms</td>
+            </tr>
+            <tr>
+                <td><strong>Test Duration:</strong></td>
+                <td>4.26s</td>
+                <td><strong>P99:</strong></td>
+                <td>4169ms</td>
+            </tr>
+        </table>
+    </div>
+    
+    
+    <div class="section">
+        <h2>Errors (978 total)</h2>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:34:34.557Z</div>
+                <strong>Category:</strong> clean<br>
+                <strong>Error:</strong> Request failed with status code 429<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:34:34.581Z</div>
+                <strong>Category:</strong> clean<br>
+                <strong>Error:</strong> Request failed with status code 429<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:34:34.585Z</div>
+                <strong>Category:</strong> clean<br>
+                <strong>Error:</strong> Request failed with status code 429<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:34:34.606Z</div>
+                <strong>Category:</strong> clean<br>
+                <strong>Error:</strong> Request failed with status code 429<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:34:34.657Z</div>
+                <strong>Category:</strong> combination.multiVector<br>
+                <strong>Error:</strong> Request failed with status code 403<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:34:34.661Z</div>
+                <strong>Category:</strong> combination.multiVector<br>
+                <strong>Error:</strong> Request failed with status code 429<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:34:34.664Z</div>
+                <strong>Category:</strong> clean<br>
+                <strong>Error:</strong> Request failed with status code 429<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:34:34.667Z</div>
+                <strong>Category:</strong> clean<br>
+                <strong>Error:</strong> Request failed with status code 429<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:34:34.671Z</div>
+                <strong>Category:</strong> moderation.violence<br>
+                <strong>Error:</strong> Request failed with status code 429<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:34:34.675Z</div>
+                <strong>Category:</strong> clean<br>
+                <strong>Error:</strong> Request failed with status code 429<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:34:34.678Z</div>
+                <strong>Category:</strong> clean<br>
+                <strong>Error:</strong> Request failed with status code 429<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:34:34.682Z</div>
+                <strong>Category:</strong> clean<br>
+                <strong>Error:</strong> Request failed with status code 429<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:34:34.685Z</div>
+                <strong>Category:</strong> clean<br>
+                <strong>Error:</strong> Request failed with status code 429<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:34:34.688Z</div>
+                <strong>Category:</strong> combination.multiVector<br>
+                <strong>Error:</strong> Request failed with status code 429<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:34:34.691Z</div>
+                <strong>Category:</strong> clean<br>
+                <strong>Error:</strong> Request failed with status code 429<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:34:34.695Z</div>
+                <strong>Category:</strong> clean<br>
+                <strong>Error:</strong> Request failed with status code 429<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:34:34.697Z</div>
+                <strong>Category:</strong> pii.email<br>
+                <strong>Error:</strong> Request failed with status code 429<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:34:34.700Z</div>
+                <strong>Category:</strong> injection.direct<br>
+                <strong>Error:</strong> Request failed with status code 429<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:34:34.704Z</div>
+                <strong>Category:</strong> clean<br>
+                <strong>Error:</strong> Request failed with status code 429<br>
+                
+            </div>
+        
+            <div class="error-box">
+                <div class="timestamp">2025-06-21T15:34:34.706Z</div>
+                <strong>Category:</strong> clean<br>
+                <strong>Error:</strong> Request failed with status code 429<br>
+                
+            </div>
+        
+        <p>... and 958 more errors</p>
+    </div>
+    
+    
+    <script>
+        // Response Time Chart
+        const rtCtx = document.getElementById('responseTimeChart').getContext('2d');
+        const responseTimes = [1233,1234,1174,1165,1722,1653,1656,1654,1661,1664,1669,1664,1670,1673,1674,1675,1682,1674,1683,1678,1684,1683,1691,1695,1700,1694,1705,1704,1713,1704,1713,1711,1734,1715,1718,1719,1720,1723,1727,1729,1730,1734,1733,1736,1737,1741,1744,1747,1750,1751,1753,1042,1761,1762,1764,1764,1770,1766,1770,1774,1774,1782,1786,1780,1784,1787,1792,1790,1793,1804,1798,1800,1802,1810,1807,1810,1813,1815,1818,1822,1824,1827,1829,1832,1834,1836,1839,1841,1844,1846,1848,1851,1853,1855,1857,1859,1861,1864,1866,1868,1872,1874,1876,1879,1881,1884,1885,1889,1891,1892,1896,1897,1900,1906,1909,1913,1914,1916,1918,1920,1922,1924,1927,1928,1931,1934,1936,1940,1942,1944,1946,1951,1954,1956,1958,1963,1964,1968,1973,1976,1978,1981,1983,1986,1987,1992,1995,1995,1997,1998,2002,2004,2006,2012,2015,2017,2020,2024,2026,2029,2034,2036,2038,2041,2044,2048,2050,2213,2055,2058,2056,2062,2060,2064,2072,2067,2068,2069,2077,2074,2088,2098,2087,2090,2107,2094,2099,2104,2101,2107,2111,2113,2111,2118,2122,2121,2124,2132,2128,2141,2143,2142,2149,2147,2148,2153,2153,2157,2159,2162,2164,2168,2171,2174,2176,2178,2180,2182,2185,2187,2192,2191,2193,2192,2194,2208,2204,2205,2214,2439,2218,2231,2219,2221,2223,2231,2232,2232,2233,2240,2234,2243,2240,2241,2250,2247,2248,2250,2263,2255,2265,2266,2264,2272,2280,2278,2275,2278,2280,2280,2284,2285,2281,2289,2287,2290,2291,2296,2296,2304,2300,2302,2314,2316,2320,2315,2316,2318,2325,2322,2324,2326,2327,2331,2332,2334,2339,2337,2341,2341,2344,2346,2347,2349,2351,2619,2355,2360,2362,2360,2366,2365,2366,2370,2372,2373,2378,2384,2382,2383,2395,2387,2390,2403,2394,2396,2400,2400,2404,2405,2412,2415,2420,2424,2426,2431,2433,2436,2439,2441,2445,2446,2448,2451,2453,2460,2459,2463,2464,2466,2470,2472,2473,2477,2478,2478,2483,2485,2491,2491,2497,2485,2502,2491,2506,2509,2510,2512,2503,2504,2519,2524,2522,2526,2530,2535,2533,2533,2534,2534,2533,2560,2540,2541,2542,2544,2545,2548,2550,2551,2554,2556,2558,2561,2562,2566,2567,2569,2575,2579,2581,2582,2585,2587,2588,2590,2592,2594,2597,2597,2599,2600,2603,2603,2606,2609,2610,2612,2613,2615,2616,2620,2620,2620,2621,2623,2624,2627,2628,2630,2632,2634,2636,2638,2640,2641,2643,2645,2649,2651,2652,2655,2658,2660,2661,2663,2667,2669,2671,2673,2675,2676,2678,2681,2682,2685,2687,2689,2690,2693,2694,2696,2697,2700,2701,2703,2705,2707,2709,2711,2713,2716,2717,2718,2719,2721,2723,2726,2727,2729,2731,2733,2734,2736,2737,2737,2739,2741,2743,2745,2747,2749,2750,2752,2754,2756,2757,2758,2761,2762,2765,2767,2769,2771,2773,2774,2776,2778,2780,2781,2783,2785,2786,2788,2791,2792,2795,2796,2798,2799,2802,2803,2805,2806,2808,2809,2811,2811,2813,2814,2815,2817,2818,2819,2821,2821,2823,2824,2825,2826,2827,2828,2827,2829,2829,2830,2832,2832,2834,2835,2836,2837,2838,2839,2840,2842,2843,2844,2848,2849,2850,2851,2852,2854,2855,2856,2857,2858,2858,2860,2862,2862,2863,2865,2867,2869,2870,2870,2872,2873,2874,2875,2876,2877,2878,2880,2881,2881,2882,2883,2883,2885,2886,2887,2888,2889,2890,2890,2891,2893,2894,2894,2890,2891,2892,2893,2894,2895,2896,2898,2899,2899,2901,2902,2903,2904,2905,2906,2908,2909,2910,2912,2912,2913,2916,2916,2918,2919,2919,2920,2922,2923,2924,2925,2927,2929,2930,2930,2932,2933,2935,2936,2936,2937,2939,2942,2943,2943,2945,2946,2947,2950,2950,2952,2952,2955,2956,2957,2959,2960,2961,2963,2964,2964,2966,2967,2968,2969,2970,2971,2972,2973,2975,2976,2976,2978,2979,2978,2982,2983,2984,2982,2984,2984,2989,2989,2983,2995,2994,2990,2990,2997,2997,3000,3002,3001,3000,3005,3003,3003,3005,3006,3009,3009,3010,3006,3012,3014,3016,3016,3017,3015,3020,3022,3023,3021,3025,3025,3026,3026,3027,3028,3029,3030,3031,3032,3032,3034,3035,3036,3038,3038,3039,3040,3043,3043,3044,3046,3042,3042,3042,3043,3045,3046,3047,3049,3050,3051,3052,3053,3056,3057,3058,3059,3063,3066,3067,3068,3070,3071,3073,3073,3074,3077,3077,3078,3080,3081,3082,3083,3084,3084,3086,3087,3089,3090,3091,3092,3093,3094,3096,3097,3097,3099,3100,3101,3102,3103,3104,3105,3108,3108,3108,3112,3110,3111,3117,3119,3115,3120,3120,3120,3122,3113,3116,3119,3128,3129,3120,3131,3123,3126,3138,3138,3139,3141,3140,3144,3138,3145,3151,3158,3150,3149,3150,3153,3153,3154,3156,3156,3158,3160,3161,3162,3164,3165,3167,3169,3166,3167,3168,3170,3171,3172,3174,3175,3177,3178,3179,3181,3181,3183,3184,3185,3186,3187,3189,3190,3192,3192,3193,3195,3196,3197,3199,3198,3201,3202,3203,3204,3205,3206,3207,3209,3210,3212,3212,3213,3215,3216,3216,3218,3219,3220,3222,3223,3224,3225,3226,3228,3229,3230,3232,3232,3234,3235,3236,3238,3239,3239,3242,3240,3244,3240,3241,3243,3250,3253,3252,3253,3254,3256,3255,3264,3257,3258,3259,3261,3262,3262,3264,3264,3269,3269,3270,3270,3271,3273,3269,3274,3278,3278,3279,3277,3282,3284,3283,3286,3289,3286,3289,3290,3291,3292,3294,3295,3296,3297,3299,3300,3302,3302,3306,3308,3309,3309,3312,3313,3315,3316,3316,3317,3319,3320,3321,3323,3326,3327,3329,3330,3330,3332,3332,3333,3334,3336,3336,3337,3339,3339,3340,3342,3344,3345,4146,4136,4149,4130,4139,4124,4154,4133,4134,4140,4146,4149,4155,4146,4163,4164,4185,4181,4175,4175,4170,4169,4176,4201,4194,4182];
+        const rtBuckets = createHistogram(responseTimes, 20);
+        
+        new Chart(rtCtx, {
+            type: 'bar',
+            data: {
+                labels: rtBuckets.labels,
+                datasets: [{
+                    label: 'Response Time Distribution',
+                    data: rtBuckets.data,
+                    backgroundColor: '#3498db'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Number of Requests'
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Response Time (ms)'
+                        }
+                    }
+                }
+            }
+        });
+        
+        // Status Code Chart
+        const scCtx = document.getElementById('statusCodeChart').getContext('2d');
+        const statusCodes = {"200":26};
+        
+        new Chart(scCtx, {
+            type: 'doughnut',
+            data: {
+                labels: Object.keys(statusCodes),
+                datasets: [{
+                    data: Object.values(statusCodes),
+                    backgroundColor: [
+                        '#27ae60', // 200
+                        '#f39c12', // 403
+                        '#e74c3c', // 500
+                        '#9b59b6', // Others
+                        '#34495e'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'right'
+                    }
+                }
+            }
+        });
+        
+        function createHistogram(data, bins) {
+            if (!data.length) return { labels: [], data: [] };
+            
+            const min = Math.min(...data);
+            const max = Math.max(...data);
+            const binWidth = (max - min) / bins;
+            const histogram = new Array(bins).fill(0);
+            const labels = [];
+            
+            for (let i = 0; i < bins; i++) {
+                const start = Math.round(min + i * binWidth);
+                const end = Math.round(min + (i + 1) * binWidth);
+                labels.push(`${start}-${end}`);
+            }
+            
+            data.forEach(value => {
+                const binIndex = Math.min(Math.floor((value - min) / binWidth), bins - 1);
+                histogram[binIndex]++;
+            });
+            
+            return { labels, data: histogram };
+        }
+    </script>
+</body>
+</html>
+        

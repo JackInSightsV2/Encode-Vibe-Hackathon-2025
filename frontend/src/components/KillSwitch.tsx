@@ -8,21 +8,35 @@ interface KillSwitchData {
 const KillSwitch: React.FC = () => {
   const [data, setData] = useState<KillSwitchData>({ blocked_users: [], blocked_sessions: [] })
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [newUserId, setNewUserId] = useState('')
 
   useEffect(() => {
-    fetchKillSwitchData()
+    fetchData()
   }, [])
 
-  const fetchKillSwitchData = async () => {
+  const fetchData = async () => {
     try {
+      setLoading(true)
+      setError(null)
+      
       const response = await fetch('/api/killswitch')
-      if (response.ok) {
-        const result = await response.json()
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      const result = await response.json()
+      
+      if (result.success && result.data) {
         setData(result.data)
+      } else {
+        throw new Error(result.error || 'Invalid response format')
       }
     } catch (error) {
-      console.error('Failed to fetch kill switch data:', error)
+      console.error('Error fetching kill switch data:', error)
+      setError(error instanceof Error ? error.message : 'Failed to fetch kill switch data')
+      setData({ blocked_users: [], blocked_sessions: [] })
     } finally {
       setLoading(false)
     }
@@ -44,7 +58,7 @@ const KillSwitch: React.FC = () => {
       
       if (response.ok) {
         setNewUserId('')
-        fetchKillSwitchData()
+        fetchData()
       }
     } catch (error) {
       console.error('Failed to block user:', error)
@@ -64,12 +78,14 @@ const KillSwitch: React.FC = () => {
       })
       
       if (response.ok) {
-        fetchKillSwitchData()
+        fetchData()
       }
     } catch (error) {
       console.error('Failed to unblock user:', error)
     }
   }
+
+
 
   if (loading) {
     return (

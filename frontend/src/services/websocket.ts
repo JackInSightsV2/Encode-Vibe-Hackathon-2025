@@ -15,6 +15,14 @@ export const MessageTypes = {
   KILL_SWITCH_UPDATE: 'kill_switch_update',
   PROVIDER_STATUS: 'provider_status',
   CLIENT_MESSAGE: 'client_message',
+  MODERATION_EVENT: 'moderation_event',
+  PII_DETECTION: 'pii_detection',
+  RULE_UPDATED: 'rule_updated',
+  TEST_RESULT: 'test_result',
+  LAYER_STATUS: 'layer_status',
+  RATE_LIMIT_UPDATE: 'rate_limit_update',
+  IP_PROTECTION_UPDATE: 'ip_protection_update',
+  DDOS_UPDATE: 'ddos_update',
   ERROR: 'error',
   ACK: 'ack',
 } as const;
@@ -42,7 +50,7 @@ export class WebSocketService {
   private ws: WebSocket | null = null;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
-  private reconnectTimeout: number | null = null;
+  private reconnectTimeout: NodeJS.Timeout | null = null;
   private status: ConnectionStatus = ConnectionStatus.DISCONNECTED;
   private handlers: WebSocketEventHandlers = {};
   private url: string;
@@ -78,7 +86,7 @@ export class WebSocketService {
         this.ws = new WebSocket(this.url);
 
         this.ws.onopen = () => {
-          console.log('WebSocket connected');
+          console.log('🔌 WebSocket connected to:', this.url);
           this.setStatus(ConnectionStatus.CONNECTED);
           this.reconnectAttempts = 0;
           this.flushMessageQueue();
@@ -176,6 +184,8 @@ export class WebSocketService {
   }
 
   private handleMessage(message: WSMessage): void {
+    console.log('📨 WebSocket message received:', message.type, message);
+    
     // Call general message handler
     this.handlers.onMessage?.(message);
 
@@ -196,6 +206,12 @@ export class WebSocketService {
         break;
       case MessageTypes.ACK:
         console.log('Message acknowledged:', message.id);
+        break;
+      case MessageTypes.MODERATION_EVENT:
+        console.log('🛡️ Moderation event received:', message.data);
+        break;
+      case MessageTypes.PII_DETECTION:
+        console.log('🔒 PII detection event received:', message.data);
         break;
       default:
         console.log('Unhandled message type:', message.type, message);

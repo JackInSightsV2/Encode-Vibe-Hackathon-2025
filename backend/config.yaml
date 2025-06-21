@@ -48,6 +48,176 @@ routing:
   fallback_chain: ["mock", "local", "openai", "anthropic"]
 
 security:
+  # Rate Limiting Configuration (Cycle 6B Enhanced)
+  rate_limiting:
+    enabled: true
+    storage:
+      type: "memory"  # "memory" or "redis"
+      redis_url: ""   # Redis URL if using Redis storage
+      prefix: "qt1_rate_limit:"
+    global:
+      requests_per_second: 2000
+      burst: 4000
+      window_size: "1m"
+      algorithm: "token_bucket"
+    per_ip:
+      requests_per_minute: 10000
+      requests_per_hour: 10000
+      burst: 10000
+      window_size: "1m"
+      algorithm: "sliding_window"
+    per_user:
+      requests_per_minute: 20000
+      requests_per_hour: 20000
+      burst: 20000
+      window_size: "1m"
+      algorithm: "sliding_window"
+    endpoints:
+      "/chat":
+        requests_per_minute: 30000
+        requests_per_hour: 900000
+        burst: 5000
+        window_size: "1m"
+        algorithm: "sliding_window"
+      "/api/config":
+        requests_per_minute: 10000
+        requests_per_hour: 300000
+        burst: 2000
+        window_size: "1m"
+        algorithm: "token_bucket"
+    
+  # Security Headers Configuration
+  headers:
+    enabled: true
+    hsts_max_age: 31536000
+    csp_policy: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; style-src-elem 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https:; connect-src 'self' https: ws: wss:; frame-ancestors 'none'"
+    
+  # Request Validation Configuration
+  validation:
+    max_request_size: "10MB"
+    request_timeout: "30s"
+    
+  # CORS Security Configuration
+  cors:
+    enabled: true
+    allowed_origins:
+      - "http://localhost:3000"
+      - "http://localhost:5173"
+      - "https://localhost:3000"
+      - "https://localhost:5173"
+      # - "*.yourdomain.com"  # Example wildcard subdomain support
+    allowed_methods:
+      - "GET"
+      - "POST"
+      - "PUT"
+      - "DELETE"
+      - "OPTIONS"
+      - "PATCH"
+    allowed_headers:
+      - "Content-Type"
+      - "Authorization"
+      - "X-Requested-With"
+      - "Accept"
+      - "Origin"
+      - "Cache-Control"
+      - "X-File-Name"
+    exposed_headers:
+      - "X-Total-Count"
+      - "X-Rate-Limit-Limit"
+      - "X-Rate-Limit-Remaining"
+      - "X-Rate-Limit-Reset"
+    allow_credentials: true
+    max_age: 86400  # 24 hours
+    
+  # Input Validation Rules
+  input_validation:
+    enabled: true
+    max_parameter_length: 100
+    max_value_length: 10000
+    max_json_depth: 10
+    max_json_keys: 100
+    sanitize_html: true
+    detect_xss: true
+    detect_sql_injection: true
+    detect_command_injection: true
+    detect_path_traversal: true
+    
+  # Security Event Monitoring
+  security_monitoring:
+    enabled: true
+    log_security_events: true
+    alert_on_attacks: true
+    block_suspicious_ips: false  # Set to true to enable automatic IP blocking
+    suspicious_request_threshold: 10
+    block_duration_minutes: 15
+    
+  # IP-Based Protection & Geoblocking (Cycle 6D)
+  ip_protection:
+    enabled: true
+    enable_geoblocking: false  # Set to true to enable country-based blocking
+    enable_reputation_check: true
+    
+    # Country-based access control
+    blocked_countries:
+      # - "CN"  # China
+      # - "RU"  # Russia
+      # - "KP"  # North Korea
+      # - "IR"  # Iran
+    allowed_countries: []  # If specified, only these countries are allowed
+    
+    # IP-based access control (supports both individual IPs and CIDR ranges)
+    blocked_ips:
+      - "192.168.1.100"  # Example blocked IP
+      # - "10.0.0.0/8"   # Example blocked CIDR range
+      # - "185.220.100.0/24"  # Known Tor exit nodes example
+    allowed_ips:
+      - "127.0.0.1"      # Localhost
+      - "192.168.1.0/24" # Local network
+      # - "203.0.113.0/24"  # Example trusted network
+    
+    # Suspicious activity detection
+    suspicious_threshold: 5       # Number of violations before auto-blocking
+    auto_block_duration: "15m"    # How long to block suspicious IPs
+    
+    # IP reputation checking
+    reputation_threshold: 0.7     # Block IPs with reputation score >= this (0.0-1.0)
+    block_malicious_ips: true     # Block known malicious IPs regardless of score
+    
+    # Error handling
+    block_on_geo_error: false     # Block if geolocation lookup fails
+    block_on_reputation_error: false  # Block if reputation check fails
+
+  # DDoS Protection & Advanced Security (Cycle 6E)
+  ddos_protection:
+    enabled: true
+    
+    # Request spike detection
+    spike_threshold: 1000         # Requests per window that trigger spike detection
+    spike_window: "1m"            # Time window for spike detection
+    
+    # Circuit breaker configuration
+    circuit_breaker_threshold: 50     # Failures to open circuit breaker
+    circuit_breaker_timeout: "30s"    # Time to wait before trying half-open
+    circuit_breaker_requests: 10      # Successful requests to close circuit
+    
+    # Protection mechanisms
+    enable_blocking: true         # Block requests during attacks
+    enable_throttling: true       # Apply adaptive throttling
+    enable_degradation: true      # Enable graceful degradation
+    enable_metrics: true          # Enable DDoS metrics collection
+    
+    # Throttling configuration
+    throttle_base_delay: "10ms"   # Base throttling delay
+    throttle_max_delay: "1s"      # Maximum throttling delay
+    throttle_scale_factor: 2.0    # Exponential scaling factor
+    
+    # Degradation settings
+    degradation_threshold: 500    # Active connections for degradation
+    
+    # Alert settings
+    alert_cooldown: "5m"          # Minimum time between alerts
+
+  # Prompt Injection Detection
   prompt_injection:
     enabled: true
     sensitivity: "high"
@@ -86,6 +256,123 @@ moderation:
       threshold: 0.8
   # Legacy support
   use_openai: false
+  
+  # Advanced Moderation Engine Configuration
+  advanced:
+    enabled: true   # Now enabled with PII detection implemented
+    layers:
+      - name: "regex"
+        enabled: true
+        weight: 0.8
+        threshold: 0.6
+        options:
+          blocked_words:
+            - "violence"
+            - "hate"
+            - "explicit" 
+            - "harmful"
+            - "suicide"
+            - "self-harm"
+            - "terrorist"
+            - "bomb"
+            - "weapon"
+          custom_patterns:
+            - pattern: '(?i)\b(kill|murder|destroy|eliminate)\s+(yourself|myself|everyone|all)\b'
+              weight: 0.9
+              reason: "Violent language detected"
+      - name: "openai"
+        enabled: false  # Requires API key
+        weight: 0.4
+        threshold: 0.7
+        options:
+          model: "text-moderation-latest"
+          timeout: 10
+      - name: "pii"
+        enabled: true   # Now implemented!
+        weight: 0.2
+        threshold: 0.6
+        options:
+          masking_enabled: true
+          detect_email: true
+          detect_phone: true
+          detect_ssn: true
+          detect_credit_card: true
+          email_confidence: 0.95
+          phone_confidence: 0.90
+          ssn_confidence: 0.98
+          credit_card_confidence: 0.95
+          custom_patterns: []
+      - name: "custom_rules"
+        enabled: true   # Now implemented!
+        weight: 0.1
+        threshold: 0.5
+        options:
+          rules_path: "./rules"  # Directory or file path for rules
+          hot_reload: false
+          enable_caching: true
+      - name: "relevancy"
+        enabled: true   # Local keyword-based relevancy
+        weight: 0.3
+        threshold: 0.3  # Block if relevancy score below 0.3 (irrelevant)
+        options:
+          # Custom relevant keywords (high scores = more relevant)
+          relevant_keywords:
+            - "programming"
+            - "coding"
+            - "software"
+            - "api"
+            - "development"
+            - "technology"
+            - "ai"
+            - "machine learning"
+          # Custom irrelevant keywords (low scores = less relevant)  
+          irrelevant_keywords:
+            - "cooking"
+            - "weather"
+            - "sports"
+            - "celebrity"
+            - "gossip"
+          # Advanced custom keyword scoring (0.0 = irrelevant, 1.0 = highly relevant)
+          custom_keywords:
+            "artificial intelligence": 0.95
+            "deep learning": 0.9
+            "neural network": 0.9
+            "algorithm": 0.85
+            "database": 0.8
+            "python": 0.8
+            "javascript": 0.8
+            "golang": 0.8
+            "react": 0.75
+            "nodejs": 0.75
+            "docker": 0.7
+            "kubernetes": 0.7
+            # Lower relevance examples
+            "recipe": 0.2
+            "vacation": 0.1
+            "celebrity news": 0.1
+        
+    thresholds:
+      low: 0.2       # Log only
+      medium: 0.4    # Flag for review
+      high: 0.6      # Block request
+      critical: 0.8  # Block and alert
+      
+    actions:
+      low: "log"
+      medium: "flag"
+      high: "block"
+      critical: "block_and_alert"
+      
+    cache:
+      enabled: true
+      ttl_minutes: 60
+      max_entries: 10000
+      
+    analytics:
+      enabled: true
+      collect_details: false  # Don't collect sensitive details by default
+      retention_days: 30
+      enable_performance: true
 
 relevance:
   enabled: false
@@ -106,3 +393,139 @@ logging:
   log_level: "info"
   use_sqlite: false
   sqlite_db: "logs/qt1.db"
+
+metrics:
+  enabled: true
+  storage:
+    type: "memory"  # "memory" or "supabase"
+    retention_hours: 24
+    cleanup_interval_minutes: 60
+    max_memory_mb: 100
+  supabase:  # Optional external database
+    url: ""  # Set via SUPABASE_URL env var
+    key: ""  # Set via SUPABASE_ANON_KEY env var  
+    table: "qt1_metrics"
+  collection:
+    http_requests: true
+    moderation_events: true
+    system_health: true
+    pii_detection: true
+  # Time-Series Data Storage Configuration (Cycle 3B)
+  timeseries:
+    enabled: true
+    aggregation_interval_seconds: 60  # Run aggregation every minute
+    max_buckets_per_resolution: 10000
+    resolutions:
+      - resolution: "1m"
+        retention_hours: 6      # Keep 1-minute data for 6 hours
+      - resolution: "5m"
+        retention_hours: 72     # Keep 5-minute data for 3 days
+      - resolution: "1h"
+        retention_hours: 720    # Keep hourly data for 30 days
+      - resolution: "1d"
+        retention_hours: 8760   # Keep daily data for 1 year
+
+database:
+  type: "sqlite"  # "sqlite" or "postgresql"
+  # PostgreSQL configuration (when type is "postgresql")
+  host: "localhost"
+  port: 5432
+  name: "qt1_middleware"
+  username: ""  # Set via QT1_DB_USERNAME env var
+  password: ""  # Set via QT1_DB_PASSWORD env var
+  ssl_mode: "disable"
+  
+  # SQLite configuration (when type is "sqlite")
+  sqlite_file: "storage/qt1.db"
+  enable_wal: true
+  enable_foreign_keys: true
+  
+  # Connection pool settings
+  max_connections: 25
+  max_idle_connections: 5
+  connection_lifetime: "1h"
+  
+  # Migration settings
+  migrations:
+    enabled: true
+    directory: "./database/migrations"
+    table: "schema_migrations"
+    
+  # Data retention policies
+  retention:
+    requests: "30d"
+    metrics: "7d"
+    logs: "90d"
+
+# Opik Integration Configuration (Cycle 21A)
+opik:
+  enabled: true
+  api_key: ""  # Set via OPIK_API_KEY environment variable
+  project_name: "qt1-safety-cockpit"
+  base_url: "https://api.opik.com"
+  batch_size: 100
+  flush_interval: "5s"
+  
+  # Tracing configuration
+  tracing:
+    enabled: true
+    sample_rate: 1.0  # 100% sampling - adjust for production
+    trace_moderation: true
+    trace_providers: true
+    trace_security: true
+    
+  # Evaluation configuration
+  evaluations:
+    enabled: true
+    run_async: true
+    timeout: "10s"
+    evaluators:
+      - "regex_effectiveness"
+      - "llm_accuracy"
+      - "pii_coverage"
+      - "false_positive_rate"
+      - "response_time"
+      
+  # Self-Optimizing Rules Engine (Cycle 22A)
+  optimizer:
+    enabled: true
+    project_name: "qt1-rule-optimizer"
+    max_workers: 10
+    experiment_duration: "1h"
+    min_sample_size: 1000
+    confidence_level: 0.95
+    python_script_path: "./optimizer/python/"
+    
+    # Genetic Algorithm Parameters
+    population_size: 100
+    mutation_rate: 0.1
+    crossover_rate: 0.3
+    elitism_rate: 0.1
+    
+    # Safety Thresholds
+    min_detection_rate: 0.95
+    max_false_positive_rate: 0.05
+    max_response_time_ms: 10
+    
+    # Optimization Objectives
+    objectives:
+      detection_rate:
+        weight: 0.4
+        target: 0.95
+        type: "maximize"
+        description: "Percentage of actual threats correctly identified"
+      false_positive_rate:
+        weight: 0.3
+        target: 0.05
+        type: "minimize"
+        description: "Percentage of benign content incorrectly flagged"
+      response_time_ms:
+        weight: 0.2
+        target: 10.0
+        type: "minimize"
+        description: "Average time to process a request"
+      user_satisfaction:
+        weight: 0.1
+        target: 0.9
+        type: "maximize"
+        description: "User satisfaction score based on feedback"

@@ -1,0 +1,14 @@
+{
+  "dependencies": {
+    "@types/recharts": "^1.8.29",
+    "recharts": "^2.15.3"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/jest": "^30.0.0",
+    "jest": "^30.0.2",
+    "jest-environment-jsdom": "^30.0.2"
+  }
+}

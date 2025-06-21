@@ -1,0 +1,10 @@
+{
+  "testId": "ed20086b-df1f-4ee3-b9c2-3548dbe1859a",
+  "timestamp": "2025-06-21T22:39:14.443Z",
+  "totalRequests": 98,
+  "successRate": 62.244897959183675,
+  "avgResponseTime": 143.0408163265306,
+  "requestsPerSecond": 4.856534020516379,
+  "duration": 20179,
+  "errorCount": 98
+}

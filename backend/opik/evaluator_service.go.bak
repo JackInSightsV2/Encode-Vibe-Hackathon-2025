@@ -1,0 +1,596 @@
+package opik
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"sync"
+	"time"
+)
+
+// EvaluatorService manages evaluation execution and reporting
+type EvaluatorService struct {
+	registry     *EvaluatorRegistry
+	opikClient   *OpikClient
+	streamManager *EventStreamManager
+	config       *EvaluatorServiceConfig
+	
+	// Evaluation storage
+	results      map[string][]*EvaluationResult
+	batches      map[string]*EvaluationBatch
+	resultsMu    sync.RWMutex
+	
+	// Background evaluation
+	evaluationQueue chan *EvaluationRequest
+	workers         int
+	stopChan        chan struct{}
+	wg              sync.WaitGroup
+}
+
+// EvaluatorServiceConfig configures the evaluator service
+type EvaluatorServiceConfig struct {
+	Enabled              bool          `yaml:"enabled" json:"enabled"`
+	Workers              int           `yaml:"workers" json:"workers"`
+	QueueSize            int           `yaml:"queue_size" json:"queue_size"`
+	BatchSize            int           `yaml:"batch_size" json:"batch_size"`
+	EvaluationInterval   time.Duration `yaml:"evaluation_interval" json:"evaluation_interval"`
+	RetentionPeriod      time.Duration `yaml:"retention_period" json:"retention_period"`
+	RealtimeEvaluation   bool          `yaml:"realtime_evaluation" json:"realtime_evaluation"`
+	EnableAggregation    bool          `yaml:"enable_aggregation" json:"enable_aggregation"`
+	MetricsReporting     bool          `yaml:"metrics_reporting" json:"metrics_reporting"`
+}
+
+// EvaluationRequest represents a request for evaluation
+type EvaluationRequest struct {
+	ID           string                 `json:"id"`
+	TraceID      string                 `json:"trace_id"`
+	SpanID       string                 `json:"span_id"`
+	EvaluatorIDs []string               `json:"evaluator_ids"`
+	Context      *EvaluationContext     `json:"context"`
+	Metadata     map[string]interface{} `json:"metadata"`
+	Priority     int                    `json:"priority"`
+	Timestamp    time.Time              `json:"timestamp"`
+}
+
+// NewEvaluatorService creates a new evaluator service
+func NewEvaluatorService(opikClient *OpikClient, streamManager *EventStreamManager, config *EvaluatorServiceConfig) *EvaluatorService {
+	if config == nil {
+		config = &EvaluatorServiceConfig{
+			Enabled:              true,
+			Workers:              4,
+			QueueSize:            1000,
+			BatchSize:            50,
+			EvaluationInterval:   5 * time.Minute,
+			RetentionPeriod:      24 * time.Hour,
+			RealtimeEvaluation:   true,
+			EnableAggregation:    true,
+			MetricsReporting:     true,
+		}
+	}
+	
+	service := &EvaluatorService{
+		registry:        NewEvaluatorRegistry(),
+		opikClient:      opikClient,
+		streamManager:   streamManager,
+		config:          config,
+		results:         make(map[string][]*EvaluationResult),
+		batches:         make(map[string]*EvaluationBatch),
+		evaluationQueue: make(chan *EvaluationRequest, config.QueueSize),
+		workers:         config.Workers,
+		stopChan:        make(chan struct{}),
+	}
+	
+	// Start background workers
+	if config.Enabled {
+		service.start()
+	}
+	
+	return service
+}
+
+// Start begins the evaluation service
+func (es *EvaluatorService) start() {
+	// Start worker goroutines
+	for i := 0; i < es.workers; i++ {
+		es.wg.Add(1)
+		go es.worker(i)
+	}
+	
+	// Start cleanup routine
+	es.wg.Add(1)
+	go es.cleanupRoutine()
+	
+	// Start aggregation routine
+	if es.config.EnableAggregation {
+		es.wg.Add(1)
+		go es.aggregationRoutine()
+	}
+	
+	// Start metrics reporting
+	if es.config.MetricsReporting {
+		es.wg.Add(1)
+		go es.metricsRoutine()
+	}
+}
+
+// Stop shuts down the evaluation service
+func (es *EvaluatorService) Stop() {
+	close(es.stopChan)
+	close(es.evaluationQueue)
+	es.wg.Wait()
+}
+
+// RegisterEvaluator registers a new evaluator
+func (es *EvaluatorService) RegisterEvaluator(evaluator Evaluator) error {
+	return es.registry.Register(evaluator)
+}
+
+// EvaluateTrace evaluates a trace with all registered evaluators
+func (es *EvaluatorService) EvaluateTrace(ctx context.Context, trace *Trace) ([]*EvaluationResult, error) {
+	evalCtx := &EvaluationContext{
+		TraceID:   trace.ID,
+		Metadata:  trace.Metadata,
+		StartTime: trace.StartTime,
+		EndTime:   trace.EndTime,
+	}
+	
+	// Add trace-specific metadata
+	if input, ok := trace.Metadata["input"].(string); ok {
+		evalCtx.Input = input
+	}
+	if output, ok := trace.Metadata["output"].(string); ok {
+		evalCtx.Output = output
+	}
+	if expected, ok := trace.Metadata["expected"].(string); ok {
+		evalCtx.Expected = expected
+	}
+	
+	return es.registry.EvaluateAll(ctx, evalCtx)
+}
+
+// EvaluateSpan evaluates a span with relevant evaluators
+func (es *EvaluatorService) EvaluateSpan(ctx context.Context, span *Span) ([]*EvaluationResult, error) {
+	evalCtx := &EvaluationContext{
+		TraceID:   span.TraceID,
+		SpanID:    span.ID,
+		Metadata:  span.Metadata,
+		StartTime: span.StartTime,
+		EndTime:   span.EndTime,
+	}
+	
+	// Add span-specific metadata
+	if input, ok := span.Metadata["input"].(string); ok {
+		evalCtx.Input = input
+	}
+	if output, ok := span.Metadata["output"].(string); ok {
+		evalCtx.Output = output
+	}
+	
+	// Select evaluators based on span type
+	evaluatorNames := es.selectEvaluatorsForSpan(span)
+	
+	results := make([]*EvaluationResult, 0)
+	for _, name := range evaluatorNames {
+		evaluator, err := es.registry.Get(name)
+		if err != nil {
+			continue // Skip missing evaluators
+		}
+		
+		result, err := evaluator.Evaluate(ctx, evalCtx)
+		if err != nil {
+			// Log error but continue with other evaluators
+			fmt.Printf("Evaluation error for %s: %v\n", name, err)
+			continue
+		}
+		
+		results = append(results, result)
+	}
+	
+	return results, nil
+}
+
+// QueueEvaluation queues an evaluation request for background processing
+func (es *EvaluatorService) QueueEvaluation(req *EvaluationRequest) error {
+	if !es.config.Enabled {
+		return fmt.Errorf("evaluator service is disabled")
+	}
+	
+	select {
+	case es.evaluationQueue <- req:
+		return nil
+	default:
+		return fmt.Errorf("evaluation queue is full")
+	}
+}
+
+// GetResults retrieves evaluation results for a trace or span
+func (es *EvaluatorService) GetResults(id string) ([]*EvaluationResult, bool) {
+	es.resultsMu.RLock()
+	defer es.resultsMu.RUnlock()
+	
+	results, exists := es.results[id]
+	if !exists {
+		return nil, false
+	}
+	
+	// Return a copy to prevent race conditions
+	resultsCopy := make([]*EvaluationResult, len(results))
+	copy(resultsCopy, results)
+	
+	return resultsCopy, true
+}
+
+// GetBatch retrieves an evaluation batch
+func (es *EvaluatorService) GetBatch(batchID string) (*EvaluationBatch, bool) {
+	es.resultsMu.RLock()
+	defer es.resultsMu.RUnlock()
+	
+	batch, exists := es.batches[batchID]
+	return batch, exists
+}
+
+// GetEvaluatorStats returns statistics for evaluators
+func (es *EvaluatorService) GetEvaluatorStats() map[string]*EvaluatorStats {
+	es.resultsMu.RLock()
+	defer es.resultsMu.RUnlock()
+	
+	stats := make(map[string]*EvaluatorStats)
+	
+	for _, results := range es.results {
+		for _, result := range results {
+			if stats[result.EvaluatorName] == nil {
+				stats[result.EvaluatorName] = &EvaluatorStats{
+					EvaluatorName: result.EvaluatorName,
+					EvaluatorType: result.EvaluatorType,
+				}
+			}
+			
+			stat := stats[result.EvaluatorName]
+			stat.TotalEvaluations++
+			stat.TotalScore += result.Score
+			
+			if result.Passed {
+				stat.PassedCount++
+			} else {
+				stat.FailedCount++
+			}
+			
+			if result.Score > stat.HighestScore {
+				stat.HighestScore = result.Score
+			}
+			if stat.LowestScore == 0 || result.Score < stat.LowestScore {
+				stat.LowestScore = result.Score
+			}
+		}
+	}
+	
+	// Calculate averages
+	for _, stat := range stats {
+		if stat.TotalEvaluations > 0 {
+			stat.AverageScore = stat.TotalScore / float64(stat.TotalEvaluations)
+			stat.PassRate = float64(stat.PassedCount) / float64(stat.TotalEvaluations)
+		}
+	}
+	
+	return stats
+}
+
+// Worker processes evaluation requests
+func (es *EvaluatorService) worker(workerID int) {
+	defer es.wg.Done()
+	
+	for {
+		select {
+		case req, ok := <-es.evaluationQueue:
+			if !ok {
+				return // Channel closed
+			}
+			
+			es.processEvaluationRequest(req)
+			
+		case <-es.stopChan:
+			return
+		}
+	}
+}
+
+// Process a single evaluation request
+func (es *EvaluatorService) processEvaluationRequest(req *EvaluationRequest) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	
+	results := make([]*EvaluationResult, 0)
+	
+	// Run specific evaluators or all if none specified
+	if len(req.EvaluatorIDs) > 0 {
+		for _, evaluatorName := range req.EvaluatorIDs {
+			evaluator, err := es.registry.Get(evaluatorName)
+			if err != nil {
+				continue
+			}
+			
+			result, err := evaluator.Evaluate(ctx, req.Context)
+			if err != nil {
+				fmt.Printf("Evaluation error for %s: %v\n", evaluatorName, err)
+				continue
+			}
+			
+			results = append(results, result)
+		}
+	} else {
+		// Run all evaluators
+		allResults, err := es.registry.EvaluateAll(ctx, req.Context)
+		if err != nil {
+			fmt.Printf("Evaluation error: %v\n", err)
+			return
+		}
+		results = allResults
+	}
+	
+	// Store results
+	es.storeResults(req.TraceID, results)
+	
+	// Send events for real-time monitoring
+	if es.config.RealtimeEvaluation && es.streamManager != nil {
+		for _, result := range results {
+			event := es.createEvaluationEvent(result)
+			es.streamManager.PublishEvent(event)
+		}
+	}
+	
+	// Send to Opik if enabled
+	if es.opikClient != nil && es.opikClient.IsEnabled() {
+		es.sendToOpik(results)
+	}
+}
+
+// Store evaluation results
+func (es *EvaluatorService) storeResults(id string, results []*EvaluationResult) {
+	es.resultsMu.Lock()
+	defer es.resultsMu.Unlock()
+	
+	if es.results[id] == nil {
+		es.results[id] = make([]*EvaluationResult, 0)
+	}
+	
+	es.results[id] = append(es.results[id], results...)
+}
+
+// Create evaluation event for streaming
+func (es *EvaluatorService) createEvaluationEvent(result *EvaluationResult) Event {
+	return Event{
+		ID:        generateEventID(),
+		Type:      EventTypeMetric,
+		Timestamp: result.Timestamp,
+		TraceID:   result.TraceID,
+		SpanID:    result.SpanID,
+		Data: map[string]interface{}{
+			"evaluator_name": result.EvaluatorName,
+			"evaluator_type": result.EvaluatorType,
+			"score":          result.Score,
+			"passed":         result.Passed,
+			"threshold":      result.Threshold,
+			"metadata":       result.Metadata,
+		},
+		Tags: []string{"evaluation", string(result.EvaluatorType)},
+	}
+}
+
+// Send results to Opik
+func (es *EvaluatorService) sendToOpik(results []*EvaluationResult) {
+	for _, result := range results {
+		data := map[string]interface{}{
+			"evaluator_name": result.EvaluatorName,
+			"evaluator_type": result.EvaluatorType,
+			"score":          result.Score,
+			"passed":         result.Passed,
+			"threshold":      result.Threshold,
+			"metadata":       result.Metadata,
+			"timestamp":      result.Timestamp,
+		}
+		
+		jsonData, _ := json.Marshal(data)
+		
+		es.opikClient.LogEvent(OpikEvent{
+			Name:      "evaluation_result",
+			Type:      "evaluation",
+			TraceID:   result.TraceID,
+			SpanID:    result.SpanID,
+			Data:      jsonData,
+			Timestamp: result.Timestamp,
+		})
+	}
+}
+
+// Select evaluators based on span type
+func (es *EvaluatorService) selectEvaluatorsForSpan(span *Span) []string {
+	evaluators := make([]string, 0)
+	
+	// Add latency evaluator for all spans
+	evaluators = append(evaluators, "moderation_latency")
+	
+	// Add specific evaluators based on span type
+	if spanType, ok := span.Metadata["type"].(string); ok {
+		switch spanType {
+		case "moderation":
+			evaluators = append(evaluators, "moderation_accuracy", "moderation_precision")
+		case "threat_detection":
+			evaluators = append(evaluators, "threat_detection_recall", "false_positive_rate")
+		case "pii_detection":
+			evaluators = append(evaluators, "pii_detection_f1")
+		case "provider_call":
+			evaluators = append(evaluators, "provider_reliability")
+		}
+	}
+	
+	return evaluators
+}
+
+// Cleanup routine removes old results
+func (es *EvaluatorService) cleanupRoutine() {
+	defer es.wg.Done()
+	
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case <-ticker.C:
+			es.cleanup()
+		case <-es.stopChan:
+			return
+		}
+	}
+}
+
+// Cleanup old results
+func (es *EvaluatorService) cleanup() {
+	es.resultsMu.Lock()
+	defer es.resultsMu.Unlock()
+	
+	cutoff := time.Now().Add(-es.config.RetentionPeriod)
+	
+	for id, results := range es.results {
+		filteredResults := make([]*EvaluationResult, 0)
+		for _, result := range results {
+			if result.Timestamp.After(cutoff) {
+				filteredResults = append(filteredResults, result)
+			}
+		}
+		
+		if len(filteredResults) == 0 {
+			delete(es.results, id)
+		} else {
+			es.results[id] = filteredResults
+		}
+	}
+	
+	// Cleanup batches
+	for batchID, batch := range es.batches {
+		if batch.Timestamp.Before(cutoff) {
+			delete(es.batches, batchID)
+		}
+	}
+}
+
+// Aggregation routine creates evaluation batches
+func (es *EvaluatorService) aggregationRoutine() {
+	defer es.wg.Done()
+	
+	ticker := time.NewTicker(es.config.EvaluationInterval)
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case <-ticker.C:
+			es.createAggregationBatch()
+		case <-es.stopChan:
+			return
+		}
+	}
+}
+
+// Create aggregation batch
+func (es *EvaluatorService) createAggregationBatch() {
+	es.resultsMu.RLock()
+	
+	// Collect recent results
+	cutoff := time.Now().Add(-es.config.EvaluationInterval)
+	recentResults := make([]*EvaluationResult, 0)
+	
+	for _, results := range es.results {
+		for _, result := range results {
+			if result.Timestamp.After(cutoff) {
+				recentResults = append(recentResults, result)
+			}
+		}
+	}
+	es.resultsMu.RUnlock()
+	
+	if len(recentResults) > 0 {
+		batch := CreateEvaluationBatch(recentResults)
+		
+		es.resultsMu.Lock()
+		es.batches[batch.BatchID] = batch
+		es.resultsMu.Unlock()
+		
+		// Send batch event
+		if es.streamManager != nil {
+			event := Event{
+				ID:        generateEventID(),
+				Type:      EventTypeMetric,
+				Timestamp: time.Now(),
+				Data: map[string]interface{}{
+					"batch_id":          batch.BatchID,
+					"total_evaluations": batch.Summary.TotalEvaluations,
+					"passed_count":      batch.Summary.PassedCount,
+					"failed_count":      batch.Summary.FailedCount,
+					"average_score":     batch.Summary.AverageScore,
+					"scores_by_type":    batch.Summary.ScoresByType,
+				},
+				Tags: []string{"evaluation", "batch", "summary"},
+			}
+			es.streamManager.PublishEvent(event)
+		}
+	}
+}
+
+// Metrics routine reports evaluation metrics
+func (es *EvaluatorService) metricsRoutine() {
+	defer es.wg.Done()
+	
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case <-ticker.C:
+			es.reportMetrics()
+		case <-es.stopChan:
+			return
+		}
+	}
+}
+
+// Report evaluation metrics
+func (es *EvaluatorService) reportMetrics() {
+	stats := es.GetEvaluatorStats()
+	
+	for _, stat := range stats {
+		if es.streamManager != nil {
+			event := Event{
+				ID:        generateEventID(),
+				Type:      EventTypeMetric,
+				Timestamp: time.Now(),
+				Data: map[string]interface{}{
+					"metric":             "evaluator_stats",
+					"evaluator_name":     stat.EvaluatorName,
+					"evaluator_type":     stat.EvaluatorType,
+					"total_evaluations":  stat.TotalEvaluations,
+					"passed_count":       stat.PassedCount,
+					"failed_count":       stat.FailedCount,
+					"average_score":      stat.AverageScore,
+					"pass_rate":          stat.PassRate,
+					"highest_score":      stat.HighestScore,
+					"lowest_score":       stat.LowestScore,
+				},
+				Tags: []string{"metrics", "evaluator", stat.EvaluatorName},
+			}
+			es.streamManager.PublishEvent(event)
+		}
+	}
+}
+
+// EvaluatorStats represents statistics for an evaluator
+type EvaluatorStats struct {
+	EvaluatorName     string        `json:"evaluator_name"`
+	EvaluatorType     EvaluatorType `json:"evaluator_type"`
+	TotalEvaluations  int           `json:"total_evaluations"`
+	PassedCount       int           `json:"passed_count"`
+	FailedCount       int           `json:"failed_count"`
+	AverageScore      float64       `json:"average_score"`
+	PassRate          float64       `json:"pass_rate"`
+	HighestScore      float64       `json:"highest_score"`
+	LowestScore       float64       `json:"lowest_score"`
+	TotalScore        float64       `json:"-"` // Internal field
+}

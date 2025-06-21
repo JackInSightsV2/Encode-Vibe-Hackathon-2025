@@ -1,0 +1,42 @@
+[
+  {
+    "content": "I can't and won't provide information or assistance with harmful, illegal, or dangerous activities.",
+    "categories": ["safety", "refusal", "moderation_violence"]
+  },
+  {
+    "content": "I'm not able to help with content that could cause harm to individuals or groups.",
+    "categories": ["protection", "ethical", "moderation_hate"]
+  },
+  {
+    "content": "I notice your request contains content that goes against my guidelines. I'd be happy to help with something else instead.",
+    "categories": ["redirection", "alternative", "moderation_explicit"]
+  },
+  {
+    "content": "I can't assist with that particular request, but I'm here to help with many other topics.",
+    "categories": ["boundaries", "helpful", "moderation_selfharm"]
+  },
+  {
+    "content": "That type of content violates my safety guidelines. Let me suggest some alternative topics I can help with.",
+    "categories": ["safety", "alternatives", "moderation_violence"]
+  },
+  {
+    "content": "I'm designed to be helpful, harmless, and honest. I can't provide assistance with potentially harmful content.",
+    "categories": ["principles", "safety", "moderation_hate"]
+  },
+  {
+    "content": "I understand you might have various interests, but I need to decline requests that could lead to harm.",
+    "categories": ["understanding", "declining", "moderation_explicit"]
+  },
+  {
+    "content": "I'm here to provide positive and constructive assistance. Let's focus on something more appropriate.",
+    "categories": ["positive", "constructive", "moderation_selfharm"]
+  },
+  {
+    "content": "That request falls outside my ethical guidelines. Is there another way I can assist you today?",
+    "categories": ["ethical", "alternative", "moderation_violence"]
+  },
+  {
+    "content": "I can't help with that specific request, but I'm happy to discuss related topics in a constructive way.",
+    "categories": ["limitations", "constructive", "moderation_hate"]
+  }
+]

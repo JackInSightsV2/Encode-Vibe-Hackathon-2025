@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QT-1 Test Request Editor</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="editor-container">
+        <div class="nav-header">
+            <h1>🛠 QT-1 Test Request Editor</h1>
+            <a href="index.html">← Back to Testing Client</a>
+        </div>
+        
+        <div class="category-selector">
+            <h2>Select Test Category</h2>
+            <div class="category-buttons" id="categoryButtons">
+                <!-- Categories populated by JS -->
+            </div>
+            
+            <div class="subcategory-selector" id="subcategorySelector">
+                <h3>Select Subcategory</h3>
+                <div class="subcategory-buttons" id="subcategoryButtons">
+                    <!-- Subcategories populated by JS -->
+                </div>
+            </div>
+        </div>
+        
+        <div class="save-status" id="saveStatus">
+            <!-- Status messages appear here -->
+        </div>
+        
+        <div class="editor-panel" id="editorPanel">
+            <div class="stats-bar" id="statsBar">
+                <div class="stat-item">
+                    <div class="stat-value" id="totalRequests">0</div>
+                    <div class="stat-label">Total Requests</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="avgLength">0</div>
+                    <div class="stat-label">Avg Length</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="lastModified">Never</div>
+                    <div class="stat-label">Last Modified</div>
+                </div>
+            </div>
+            
+            <div class="add-request">
+                <input type="text" id="newRequestInput" placeholder="Enter new test request...">
+                <button class="btn btn-primary" onclick="addRequest()">Add Request</button>
+            </div>
+            
+            <h3>Current Requests <span id="categoryTitle"></span></h3>
+            <div class="requests-list" id="requestsList">
+                <!-- Populated dynamically -->
+            </div>
+            
+            <div class="button-group">
+                <button class="btn btn-primary" onclick="saveChanges()">💾 Save Changes</button>
+                <button class="btn btn-secondary" onclick="reloadData()">🔄 Reload Data</button>
+            </div>
+        </div>
+    </div>
+    
+    <script src="test-editor.js"></script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+[
+  {
+    "content": "I apologize, but I encountered an error while processing your request. Please try again.",
+    "categories": ["error", "retry"]
+  },
+  {
+    "content": "Something went wrong while generating my response. Could you please rephrase your question and try again?",
+    "categories": ["error", "rephrase"]
+  },
+  {
+    "content": "I'm experiencing some difficulty processing your request at the moment. Please try again in a few moments.",
+    "categories": ["error", "temporary"]
+  },
+  {
+    "content": "An unexpected error occurred while I was working on your request. I apologize for the inconvenience.",
+    "categories": ["error", "unexpected"]
+  },
+  {
+    "content": "I ran into a technical issue while processing your message. Please try submitting your request again.",
+    "categories": ["error", "technical"]
+  },
+  {
+    "content": "There was a problem generating my response. Please check your request and try again.",
+    "categories": ["error", "validation"]
+  },
+  {
+    "content": "I'm currently unable to process your request due to a technical issue. Please try again later.",
+    "categories": ["error", "unavailable"]
+  },
+  {
+    "content": "An error prevented me from completing your request. Please verify your input and try again.",
+    "categories": ["error", "verification"]
+  },
+  {
+    "content": "I apologize, but I'm having trouble understanding or processing your request right now. Please try again.",
+    "categories": ["error", "understanding"]
+  },
+  {
+    "content": "A system error occurred while handling your request. Please try again or contact support if the issue persists.",
+    "categories": ["error", "system"]
+  }
+]
