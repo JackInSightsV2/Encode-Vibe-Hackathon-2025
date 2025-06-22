@@ -13,13 +13,8 @@ RUN npm install --only=production
 # Copy application files
 COPY . .
 
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S mockai -u 1001
-
-# Change ownership of the app directory
-RUN chown -R mockai:nodejs /app
-USER mockai
+# Azure Container Instances requires root user
+# No user creation - runs as root for ACI compatibility
 
 # Expose port
 EXPOSE 8081

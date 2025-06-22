@@ -7,6 +7,7 @@ import { Progress } from './ui/progress';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, ScatterChart, Scatter } from 'recharts';
 import { Activity, AlertTriangle, CheckCircle, TrendingUp, Zap, Eye, Clock, Users, Target } from 'lucide-react';
 import { optimizerService } from '../services/optimizerService';
+import { opikService } from '../services/opikService';
 
 // Utility functions
 const getStatusColor = (status: string) => {
@@ -696,364 +697,408 @@ const AnalyticsTab: React.FC<{ historicalData: any[] }> = ({ historicalData }) =
 
 // Opik Integration Tab Component
 const OpikIntegrationTab: React.FC = () => {
-  const [opikConfig, setOpikConfig] = useState({
-    enabled: false,
-    apiKey: '',
-    baseUrl: 'https://api.opik.com',
-    projectName: 'qt1-self-optimizing-rules',
-    batchSize: 100,
-    flushInterval: 5,
-    tracing: {
-      enabled: true,
-      sampleRate: 1.0,
-      traceModeration: true,
-      traceProviders: true,
-      traceSecurity: true,
-    },
-    evaluations: {
-      enabled: true,
-      runAsync: true,
-      timeout: 30,
-      evaluators: ['accuracy', 'drift_detection', 'performance']
-    }
+  const [opikStatus, setOpikStatus] = useState<any>(null);
+  const [traces, setTraces] = useState<any[]>([]);
+  const [evaluations, setEvaluations] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [realTimeMetrics, setRealTimeMetrics] = useState({
+    totalTraces: 0,
+    successRate: 0,
+    avgResponseTime: 0,
+    moderationScore: 0,
+    activeUsers: 0,
+    blockedRequests: 0
   });
 
-  const [connectionStatus, setConnectionStatus] = useState('disconnected');
-  const [testResults, setTestResults] = useState<any>(null);
+  // Load Opik data on component mount and refresh every 10 seconds
+  useEffect(() => {
+    loadOpikData();
+    const interval = setInterval(loadOpikData, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
-  const handleConfigChange = (key: string, value: any) => {
-    setOpikConfig(prev => ({
-      ...prev,
-      [key]: value
-    }));
-  };
-
-  const handleNestedConfigChange = (section: string, key: string, value: any) => {
-    setOpikConfig(prev => ({
-      ...prev,
-      [section]: {
-        ...(prev[section as keyof typeof prev] as any),
-        [key]: value
-      }
-    }));
-  };
-
-  const testConnection = async () => {
-    setConnectionStatus('testing');
+  const loadOpikData = async () => {
     try {
-      // Test Opik connection
-      const response = await fetch('/api/safety-cockpit/test-connection', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          baseUrl: opikConfig.baseUrl,
-          apiKey: opikConfig.apiKey,
-          projectName: opikConfig.projectName
-        })
-      });
-      
-      const result = await response.json();
-      if (result.success) {
-        setConnectionStatus('connected');
-        setTestResults(result.data);
-      } else {
-        setConnectionStatus('error');
-        setTestResults({ error: result.error });
+      const [statusData, tracesData, evaluationsData] = await Promise.all([
+        opikService.getStatus(),
+        opikService.getTraces(),
+        opikService.getEvaluations()
+      ]);
+
+      setOpikStatus(statusData);
+      setTraces(tracesData);
+      setEvaluations(evaluationsData);
+
+      // Calculate real-time metrics from traces
+      if (tracesData && tracesData.length > 0) {
+        const recent = tracesData.slice(0, 50); // Last 50 traces
+        const successfulTraces = recent.filter((t: any) => t.output?.allowed !== false);
+        const blockedTraces = recent.filter((t: any) => t.output?.allowed === false);
+        const avgScore = recent.reduce((sum: number, t: any) => sum + (t.output?.final_score || 0), 0) / recent.length;
+        const avgTime = recent.reduce((sum: number, t: any) => sum + (t.output?.total_process_time || 0), 0) / recent.length;
+        const uniqueUsers = new Set(recent.map((t: any) => t.metadata?.user_id)).size;
+
+        setRealTimeMetrics({
+          totalTraces: tracesData.length,
+          successRate: (successfulTraces.length / recent.length) * 100,
+          avgResponseTime: avgTime,
+          moderationScore: avgScore * 100,
+          activeUsers: uniqueUsers,
+          blockedRequests: blockedTraces.length
+        });
       }
+
+      setLoading(false);
     } catch (error) {
-      setConnectionStatus('error');
-      setTestResults({ error: 'Connection failed' });
+      console.error('Failed to load Opik data:', error);
+      setLoading(false);
     }
   };
 
-  const saveConfiguration = async () => {
-    try {
-      const response = await fetch('/api/safety-cockpit/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ opik: opikConfig })
-      });
-      
-      if (response.ok) {
-        alert('Configuration saved successfully!');
-      } else {
-        alert('Failed to save configuration');
-      }
-    } catch (error) {
-      alert('Error saving configuration');
+  const getTraceChartData = () => {
+    if (!traces || traces.length === 0) return [];
+    
+    // Group traces by hour for the last 24 hours
+    const hourlyData: { [key: string]: { allowed: number; blocked: number; total: number } } = {};
+    const now = new Date();
+    
+    // Initialize last 24 hours
+    for (let i = 23; i >= 0; i--) {
+      const hour = new Date(now.getTime() - i * 60 * 60 * 1000);
+      const key = hour.toISOString().slice(0, 13) + ':00';
+      hourlyData[key] = { allowed: 0, blocked: 0, total: 0 };
     }
+
+    traces.forEach((trace: any) => {
+      const traceTime = new Date(trace.start_time);
+      const hourKey = traceTime.toISOString().slice(0, 13) + ':00';
+      
+      if (hourlyData[hourKey]) {
+        hourlyData[hourKey].total++;
+        if (trace.output?.allowed === false) {
+          hourlyData[hourKey].blocked++;
+        } else {
+          hourlyData[hourKey].allowed++;
+        }
+      }
+    });
+
+    return Object.entries(hourlyData).map(([time, data]) => ({
+      time: new Date(time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      allowed: data.allowed,
+      blocked: data.blocked,
+      total: data.total
+    }));
   };
+
+  const getModerationScoreDistribution = () => {
+    if (!traces || traces.length === 0) return [];
+    
+    const buckets = { '0-20': 0, '21-40': 0, '41-60': 0, '61-80': 0, '81-100': 0 };
+    
+    traces.forEach((trace: any) => {
+      const score = (trace.output?.final_score || 0) * 100;
+      if (score <= 20) buckets['0-20']++;
+      else if (score <= 40) buckets['21-40']++;
+      else if (score <= 60) buckets['41-60']++;
+      else if (score <= 80) buckets['61-80']++;
+      else buckets['81-100']++;
+    });
+
+    return Object.entries(buckets).map(([range, count]) => ({
+      range,
+      count,
+      percentage: traces.length > 0 ? (count / traces.length * 100).toFixed(1) : '0'
+    }));
+  };
+
+  const getTopUsers = () => {
+    if (!traces || traces.length === 0) return [];
+    
+    const userStats: { [key: string]: { requests: number; blocked: number; avgScore: number } } = {};
+    
+    traces.forEach((trace: any) => {
+      const userId = trace.metadata?.user_id || 'unknown';
+      if (!userStats[userId]) {
+        userStats[userId] = { requests: 0, blocked: 0, avgScore: 0 };
+      }
+      userStats[userId].requests++;
+      if (trace.output?.allowed === false) {
+        userStats[userId].blocked++;
+      }
+      userStats[userId].avgScore += trace.output?.final_score || 0;
+    });
+
+    return Object.entries(userStats)
+      .map(([userId, stats]) => ({
+        userId,
+        requests: stats.requests,
+        blocked: stats.blocked,
+        blockRate: (stats.blocked / stats.requests * 100).toFixed(1),
+        avgScore: ((stats.avgScore / stats.requests) * 100).toFixed(1)
+      }))
+      .sort((a, b) => b.requests - a.requests)
+      .slice(0, 5);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <span className="ml-3 text-lg">Loading Opik Analytics...</span>
+      </div>
+    );
+  }
+
+  const chartData = getTraceChartData();
+  const scoreDistribution = getModerationScoreDistribution();
+  const topUsers = getTopUsers();
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-2xl font-bold">Opik Integration</h2>
+          <h2 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+            🚀 Opik Analytics Dashboard
+          </h2>
           <p className="text-muted-foreground mt-1">
-            Configure Opik for tracing and evaluation of self-optimizing rules
+            Real-time moderation insights powered by Comet Opik
           </p>
         </div>
-        <div className="flex space-x-2">
-          <Button variant="outline" onClick={testConnection} disabled={connectionStatus === 'testing'}>
-            {connectionStatus === 'testing' ? 'Testing...' : 'Test Connection'}
-          </Button>
-          <Button onClick={saveConfiguration}>
-            Save Configuration
+        <div className="flex items-center space-x-4">
+          <Badge className={`${opikStatus?.connected ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+            {opikStatus?.connected ? '🟢 Connected' : '🔴 Disconnected'}
+          </Badge>
+          <Button onClick={loadOpikData} variant="outline" size="sm">
+            🔄 Refresh
           </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Connection Configuration */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Connection Settings</CardTitle>
-            <CardDescription>Configure your Opik connection parameters</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-2">Enable Opik Integration</label>
-              <label className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  checked={opikConfig.enabled}
-                  onChange={(e) => handleConfigChange('enabled', e.target.checked)}
-                  className="rounded"
-                />
-                <span>Enable Opik tracing and evaluation</span>
-              </label>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-2">API Key</label>
-              <input
-                type="password"
-                value={opikConfig.apiKey}
-                onChange={(e) => handleConfigChange('apiKey', e.target.value)}
-                placeholder="Enter your Opik API key"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-2">Base URL</label>
-              <input
-                type="url"
-                value={opikConfig.baseUrl}
-                onChange={(e) => handleConfigChange('baseUrl', e.target.value)}
-                placeholder="https://api.opik.com"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-2">Project Name</label>
-              <input
-                type="text"
-                value={opikConfig.projectName}
-                onChange={(e) => handleConfigChange('projectName', e.target.value)}
-                placeholder="qt1-self-optimizing-rules"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
+      {/* Real-time Metrics Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+        <Card className="bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
               <div>
-                <label className="block text-sm font-medium mb-2">Batch Size</label>
-                <input
-                  type="number"
-                  value={opikConfig.batchSize}
-                  onChange={(e) => handleConfigChange('batchSize', parseInt(e.target.value))}
-                  min="1"
-                  max="1000"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                />
+                <p className="text-sm font-medium text-blue-600">Total Traces</p>
+                <p className="text-2xl font-bold text-blue-900">{realTimeMetrics.totalTraces.toLocaleString()}</p>
               </div>
+              <Activity className="h-8 w-8 text-blue-500" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-green-50 to-green-100 border-green-200">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
               <div>
-                <label className="block text-sm font-medium mb-2">Flush Interval (seconds)</label>
-                <input
-                  type="number"
-                  value={opikConfig.flushInterval}
-                  onChange={(e) => handleConfigChange('flushInterval', parseInt(e.target.value))}
-                  min="1"
-                  max="60"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                />
+                <p className="text-sm font-medium text-green-600">Success Rate</p>
+                <p className="text-2xl font-bold text-green-900">{realTimeMetrics.successRate.toFixed(1)}%</p>
               </div>
+              <CheckCircle className="h-8 w-8 text-green-500" />
             </div>
           </CardContent>
         </Card>
 
-        {/* Tracing Configuration */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Tracing Configuration</CardTitle>
-            <CardDescription>Configure what gets traced in Opik</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <label className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  checked={opikConfig.tracing.enabled}
-                  onChange={(e) => handleNestedConfigChange('tracing', 'enabled', e.target.checked)}
-                  className="rounded"
-                />
-                <span>Enable tracing</span>
-              </label>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-2">Sample Rate</label>
-              <input
-                type="number"
-                value={opikConfig.tracing.sampleRate}
-                onChange={(e) => handleNestedConfigChange('tracing', 'sampleRate', parseFloat(e.target.value))}
-                min="0"
-                max="1"
-                step="0.1"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md"
-              />
-              <p className="text-xs text-gray-500 mt-1">0.0 = no tracing, 1.0 = trace everything</p>
-            </div>
-
-            <div className="space-y-2">
-              <label className="block text-sm font-medium">Trace Categories</label>
-              <div className="space-y-2">
-                <label className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    checked={opikConfig.tracing.traceModeration}
-                    onChange={(e) => handleNestedConfigChange('tracing', 'traceModeration', e.target.checked)}
-                    className="rounded"
-                  />
-                  <span>Moderation events</span>
-                </label>
-                <label className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    checked={opikConfig.tracing.traceProviders}
-                    onChange={(e) => handleNestedConfigChange('tracing', 'traceProviders', e.target.checked)}
-                    className="rounded"
-                  />
-                  <span>Provider interactions</span>
-                </label>
-                <label className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    checked={opikConfig.tracing.traceSecurity}
-                    onChange={(e) => handleNestedConfigChange('tracing', 'traceSecurity', e.target.checked)}
-                    className="rounded"
-                  />
-                  <span>Security events</span>
-                </label>
+        <Card className="bg-gradient-to-br from-purple-50 to-purple-100 border-purple-200">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-purple-600">Avg Response</p>
+                <p className="text-2xl font-bold text-purple-900">{realTimeMetrics.avgResponseTime.toFixed(0)}ms</p>
               </div>
+              <Clock className="h-8 w-8 text-purple-500" />
             </div>
           </CardContent>
         </Card>
 
-        {/* Evaluation Configuration */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Evaluation Configuration</CardTitle>
-            <CardDescription>Configure automatic evaluations for rule optimization</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <label className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  checked={opikConfig.evaluations.enabled}
-                  onChange={(e) => handleNestedConfigChange('evaluations', 'enabled', e.target.checked)}
-                  className="rounded"
-                />
-                <span>Enable automatic evaluations</span>
-              </label>
-            </div>
-
-            <div>
-              <label className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  checked={opikConfig.evaluations.runAsync}
-                  onChange={(e) => handleNestedConfigChange('evaluations', 'runAsync', e.target.checked)}
-                  className="rounded"
-                />
-                <span>Run evaluations asynchronously</span>
-              </label>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-2">Evaluation Timeout (seconds)</label>
-              <input
-                type="number"
-                value={opikConfig.evaluations.timeout}
-                onChange={(e) => handleNestedConfigChange('evaluations', 'timeout', parseInt(e.target.value))}
-                min="1"
-                max="300"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-2">Evaluators</label>
-              <div className="space-y-2">
-                {['accuracy', 'drift_detection', 'performance', 'false_positive_rate', 'user_satisfaction'].map((evaluator) => (
-                  <label key={evaluator} className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      checked={opikConfig.evaluations.evaluators.includes(evaluator)}
-                      onChange={(e) => {
-                        const evaluators = e.target.checked
-                          ? [...opikConfig.evaluations.evaluators, evaluator]
-                          : opikConfig.evaluations.evaluators.filter(ev => ev !== evaluator);
-                        handleNestedConfigChange('evaluations', 'evaluators', evaluators);
-                      }}
-                      className="rounded"
-                    />
-                    <span className="capitalize">{evaluator.replace('_', ' ')}</span>
-                  </label>
-                ))}
+        <Card className="bg-gradient-to-br from-orange-50 to-orange-100 border-orange-200">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-orange-600">Mod Score</p>
+                <p className="text-2xl font-bold text-orange-900">{realTimeMetrics.moderationScore.toFixed(1)}</p>
               </div>
+              <Target className="h-8 w-8 text-orange-500" />
             </div>
           </CardContent>
         </Card>
 
-        {/* Connection Status & Test Results */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Connection Status</CardTitle>
-            <CardDescription>Current status of your Opik integration</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div className="flex items-center space-x-2">
-                <div className={`w-3 h-3 rounded-full ${
-                  connectionStatus === 'connected' ? 'bg-green-500' :
-                  connectionStatus === 'testing' ? 'bg-yellow-500' :
-                  connectionStatus === 'error' ? 'bg-red-500' : 'bg-gray-500'
-                }`}></div>
-                <span className="capitalize">{connectionStatus}</span>
+        <Card className="bg-gradient-to-br from-indigo-50 to-indigo-100 border-indigo-200">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-indigo-600">Active Users</p>
+                <p className="text-2xl font-bold text-indigo-900">{realTimeMetrics.activeUsers}</p>
               </div>
+              <Users className="h-8 w-8 text-indigo-500" />
+            </div>
+          </CardContent>
+        </Card>
 
-              {testResults && (
-                <div className="bg-gray-50 p-4 rounded-md">
-                  <h4 className="font-medium mb-2">Test Results</h4>
-                  {testResults.error ? (
-                    <p className="text-red-600 text-sm">{testResults.error}</p>
-                  ) : (
-                    <div className="text-sm space-y-1">
-                      <p>Connection successful!</p>
-                      <p>Project: {testResults.project || 'Unknown'}</p>
-                      <p>Status: {testResults.status || 'Active'}</p>
-                    </div>
-                  )}
-                </div>
-              )}
+        <Card className="bg-gradient-to-br from-red-50 to-red-100 border-red-200">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-red-600">Blocked</p>
+                <p className="text-2xl font-bold text-red-900">{realTimeMetrics.blockedRequests}</p>
+              </div>
+              <AlertTriangle className="h-8 w-8 text-red-500" />
             </div>
           </CardContent>
         </Card>
       </div>
+
+      {/* Charts Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Trace Timeline Chart */}
+        <Card className="col-span-1">
+          <CardHeader>
+            <CardTitle className="flex items-center space-x-2">
+              <TrendingUp className="h-5 w-5" />
+              <span>Request Timeline (24h)</span>
+            </CardTitle>
+            <CardDescription>Allowed vs Blocked requests over time</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="time" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Line type="monotone" dataKey="allowed" stroke="#22c55e" strokeWidth={2} name="Allowed" />
+                <Line type="monotone" dataKey="blocked" stroke="#ef4444" strokeWidth={2} name="Blocked" />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+
+        {/* Moderation Score Distribution */}
+        <Card className="col-span-1">
+          <CardHeader>
+            <CardTitle className="flex items-center space-x-2">
+              <Target className="h-5 w-5" />
+              <span>Moderation Score Distribution</span>
+            </CardTitle>
+            <CardDescription>Distribution of moderation confidence scores</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={scoreDistribution}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="range" />
+                <YAxis />
+                <Tooltip formatter={(value, name) => [value, name === 'count' ? 'Requests' : name]} />
+                <Bar dataKey="count" fill="#8884d8" />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Tables Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Recent Traces */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center space-x-2">
+              <Eye className="h-5 w-5" />
+              <span>Recent Traces</span>
+            </CardTitle>
+            <CardDescription>Latest moderation requests</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3 max-h-80 overflow-y-auto">
+              {traces.slice(0, 10).map((trace: any, index: number) => (
+                <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-2">
+                      <Badge className={trace.output?.allowed === false ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}>
+                        {trace.output?.allowed === false ? '🚫 Blocked' : '✅ Allowed'}
+                      </Badge>
+                      <span className="text-sm text-gray-600">
+                        {trace.metadata?.user_id || 'Unknown'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Score: {((trace.output?.final_score || 0) * 100).toFixed(1)} | 
+                      Time: {trace.output?.total_process_time || 0}ms |
+                      Layers: {trace.output?.layers_checked || 0}
+                    </p>
+                  </div>
+                  <div className="text-xs text-gray-400">
+                    {new Date(trace.start_time).toLocaleTimeString()}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Top Users */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center space-x-2">
+              <Users className="h-5 w-5" />
+              <span>Top Active Users</span>
+            </CardTitle>
+            <CardDescription>Users with most requests</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {topUsers.map((user: any, index: number) => (
+                <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-2">
+                      <span className="font-medium">{user.userId}</span>
+                      <Badge variant="outline">{user.requests} requests</Badge>
+                    </div>
+                    <div className="flex space-x-4 text-xs text-gray-500 mt-1">
+                      <span>Block Rate: {user.blockRate}%</span>
+                      <span>Avg Score: {user.avgScore}</span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm font-medium">{user.blocked} blocked</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Configuration Status */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center space-x-2">
+            <Zap className="h-5 w-5" />
+            <span>Integration Status</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="text-center p-4 bg-green-50 rounded-lg">
+              <div className="text-2xl font-bold text-green-600">{opikStatus?.enabled ? '✅' : '❌'}</div>
+              <div className="text-sm text-green-700">Opik Enabled</div>
+            </div>
+            <div className="text-center p-4 bg-blue-50 rounded-lg">
+              <div className="text-2xl font-bold text-blue-600">{opikStatus?.tracing?.enabled ? '✅' : '❌'}</div>
+              <div className="text-sm text-blue-700">Tracing Active</div>
+            </div>
+            <div className="text-center p-4 bg-purple-50 rounded-lg">
+              <div className="text-2xl font-bold text-purple-600">
+                {opikStatus?.tracing?.sample_rate ? `${(opikStatus.tracing.sample_rate * 100).toFixed(0)}%` : '0%'}
+              </div>
+              <div className="text-sm text-purple-700">Sample Rate</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 };

@@ -147,9 +147,7 @@ CREATE INDEX idx_killswitch_value ON kill_switch_entries(value);
 CREATE INDEX idx_killswitch_active ON kill_switch_entries(active);
 CREATE INDEX idx_killswitch_expires ON kill_switch_entries(expires_at);
 
--- Insert default admin user (password should be changed immediately)
-INSERT INTO users (username, email, password_hash, role) 
-VALUES ('admin', 'admin@localhost', '$2a$10$rMnL.M4xV4Oj/I0aBu.Bw.jBQzBCRgdJpPGD8fKW1V9XnKG.5SQnm', 'admin');
+-- Default admin user will be created by the application on startup
 
 -- Insert default system configuration
 INSERT INTO system_config (key, value, description, category) VALUES

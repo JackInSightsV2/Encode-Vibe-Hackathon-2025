@@ -1,7 +1,7 @@
 server:
   port: 8080
-  host: "localhost"
-  target_url: "http://localhost:8081"  # Legacy support
+  host: "0.0.0.0"
+  target_url: "http://74.177.192.23:8081"  # Azure mock provider
 
 providers:
   # Official SDKs (preferred) - API keys via environment variables
@@ -28,7 +28,7 @@ providers:
   mock:
     name: "Mock AI Service"
     api_key: ""
-    base_url: "http://localhost:8081"
+    base_url: "http://74.177.192.23:8081"
     models: ["mock-ai-v1"]
     headers:
       Content-Type: "application/json"
@@ -90,7 +90,7 @@ security:
   headers:
     enabled: true
     hsts_max_age: 31536000
-    csp_policy: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; style-src-elem 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https:; connect-src 'self' https: ws: wss:; frame-ancestors 'none'"
+    csp_policy: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; style-src-elem 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https:; connect-src 'self' https: http: ws: wss:; frame-ancestors 'none'"
     
   # Request Validation Configuration
   validation:
@@ -461,8 +461,8 @@ database:
 opik:
   enabled: true
   api_key: ""  # Set via OPIK_API_KEY environment variable
-  project_name: "qt1-safety-cockpit"
-  base_url: "https://api.opik.com"
+  project_name: "QT-1 Middleware"
+  base_url: "https://www.comet.com/opik/api"
   batch_size: 100
   flush_interval: "5s"
   

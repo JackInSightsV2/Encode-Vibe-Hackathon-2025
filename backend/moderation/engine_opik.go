@@ -119,6 +119,8 @@ func (e *EngineWithOpik) ModerateWithOpik(ctx context.Context, content string, m
 	// Create Opik trace if enabled
 	var trace *opik.Trace
 	if e.opikClient != nil && e.config.Enabled {
+		fmt.Printf("DEBUG: Creating Opik trace - client not nil: %t, config enabled: %t\n", e.opikClient != nil, e.config.Enabled)
+		
 		endpoint := ""
 		if ep, ok := moderationCtx.Metadata["endpoint"].(string); ok {
 			endpoint = ep
@@ -140,7 +142,11 @@ func (e *EngineWithOpik) ModerateWithOpik(ctx context.Context, content string, m
 		if err != nil {
 			// Log error but continue without tracing
 			fmt.Printf("Failed to create Opik trace: %v\n", err)
+		} else {
+			fmt.Printf("DEBUG: Successfully created Opik trace with ID: %s\n", trace.ID)
 		}
+	} else {
+		fmt.Printf("DEBUG: Skipping Opik trace creation - client nil: %t, config enabled: %t\n", e.opikClient == nil, e.config.Enabled)
 	}
 
 	// Run all layers
@@ -152,6 +158,7 @@ func (e *EngineWithOpik) ModerateWithOpik(ctx context.Context, content string, m
 
 	// End trace
 	if trace != nil {
+		fmt.Printf("DEBUG: Ending Opik trace %s with final_score: %.3f, allowed: %t\n", trace.ID, aggregated.FinalScore, !aggregated.FinalDecision)
 		e.opikClient.EndTrace(trace, map[string]interface{}{
 			"allowed":        !aggregated.FinalDecision,
 			"final_score":    aggregated.FinalScore,
@@ -159,6 +166,9 @@ func (e *EngineWithOpik) ModerateWithOpik(ctx context.Context, content string, m
 			"action":         aggregated.Action,
 			"layers_checked": len(layerResults),
 		})
+		fmt.Printf("DEBUG: Trace %s ended successfully\n", trace.ID)
+	} else {
+		fmt.Printf("DEBUG: No trace to end\n")
 	}
 
 	// Update cache
@@ -427,7 +437,7 @@ func (e *EngineWithOpik) updateLayerStats(results []ModerationResult) {
 }
 
 // GetStats returns current statistics
-func (e *EngineWithOpik) GetStats() *ModerationStats {
+func (e *EngineWithOpik) GetStats() ModerationStats {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
@@ -438,7 +448,121 @@ func (e *EngineWithOpik) GetStats() *ModerationStats {
 		statsCopy.LayerStats[k] = v
 	}
 
-	return &statsCopy
+	return statsCopy
+}
+
+// GetLayerNames returns the names of all layers
+func (e *EngineWithOpik) GetLayerNames() []string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	names := make([]string, len(e.layers))
+	for i, layer := range e.layers {
+		names[i] = layer.Name()
+	}
+	return names
+}
+
+// GetEnabledLayers returns all enabled layers
+func (e *EngineWithOpik) GetEnabledLayers() []ModerationLayer {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	enabled := make([]ModerationLayer, 0, len(e.layers))
+	for _, layer := range e.layers {
+		if layer.Enabled() {
+			enabled = append(enabled, layer)
+		}
+	}
+	return enabled
+}
+
+// GetLayerInfo returns information about a specific layer
+func (e *EngineWithOpik) GetLayerInfo(layerName string) (weight float64, enabled bool, found bool) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	for _, layer := range e.layers {
+		if layer.Name() == layerName {
+			return layer.Weight(), layer.Enabled(), true
+		}
+	}
+	return 0, false, false
+}
+
+// IsEnabled returns whether the engine is enabled
+func (e *EngineWithOpik) IsEnabled() bool {
+	return e.config.Enabled
+}
+
+// GetConfig returns the current configuration
+func (e *EngineWithOpik) GetConfig() *AdvancedModerationConfig {
+	// Convert from config.AdvancedModerationConfig to moderation.AdvancedModerationConfig
+	return &AdvancedModerationConfig{
+		Enabled: e.config.Enabled,
+		Layers: convertFromAppLayerConfigs(e.config.Layers),
+		Thresholds: ModerationThresholds{
+			Low:      e.config.Thresholds.Low,
+			Medium:   e.config.Thresholds.Medium,
+			High:     e.config.Thresholds.High,
+			Critical: e.config.Thresholds.Critical,
+		},
+		Actions: ActionConfig{
+			Low:      e.config.Actions.Low,
+			Medium:   e.config.Actions.Medium,
+			High:     e.config.Actions.High,
+			Critical: e.config.Actions.Critical,
+		},
+		Cache: CacheConfig{
+			Enabled:    e.config.Cache.Enabled,
+			TTLMinutes: e.config.Cache.TTLMinutes,
+			MaxEntries: e.config.Cache.MaxEntries,
+		},
+		Analytics: AnalyticsConfig{
+			Enabled:           e.config.Analytics.Enabled,
+			CollectDetails:    e.config.Analytics.CollectDetails,
+			RetentionDays:     e.config.Analytics.RetentionDays,
+			EnablePerformance: e.config.Analytics.EnablePerformance,
+		},
+	}
+}
+
+// RegisterLayer adds a new layer to the engine
+func (e *EngineWithOpik) RegisterLayer(layer ModerationLayer) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.layers = append(e.layers, layer)
+	return nil
+}
+
+// SetLayers replaces all layers
+func (e *EngineWithOpik) SetLayers(layers []ModerationLayer) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.layers = layers
+}
+
+// ReloadConfig reloads the configuration
+func (e *EngineWithOpik) ReloadConfig() error {
+	// For now, just return nil as reloading isn't implemented
+	return nil
+}
+
+// convertFromAppLayerConfigs converts app config layer configs to moderation layer configs
+func convertFromAppLayerConfigs(appLayers []config.AdvancedLayerConfig) []LayerConfig {
+	layers := make([]LayerConfig, len(appLayers))
+	for i, layer := range appLayers {
+		layers[i] = LayerConfig{
+			Name:      layer.Name,
+			Enabled:   layer.Enabled,
+			Weight:    layer.Weight,
+			Threshold: layer.Threshold,
+			Options:   layer.Options,
+		}
+	}
+	return layers
 }
 
 // UpdateLayerConfig updates configuration for a specific layer

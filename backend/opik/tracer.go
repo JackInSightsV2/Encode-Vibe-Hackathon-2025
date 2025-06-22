@@ -2,9 +2,10 @@ package opik
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
+	
+	"github.com/google/uuid"
 )
 
 // Tracer handles trace creation and management
@@ -78,8 +79,15 @@ func (t *Trace) StartSpan(name string, options SpanOptions) *Span {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	// Generate UUID v7 for span ID
+	spanUUID, err := uuid.NewV7()
+	if err != nil {
+		// Fallback to a simple ID if UUID generation fails
+		spanUUID = uuid.New() // This returns just UUID, not (UUID, error)
+	}
+
 	span := &Span{
-		ID:        fmt.Sprintf("%s-%d", t.ID, len(t.Spans)),
+		ID:        spanUUID.String(),
 		TraceID:   t.ID,
 		Name:      name,
 		StartTime: time.Now(),

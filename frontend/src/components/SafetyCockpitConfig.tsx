@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { opikService } from '../services/opikService';
 // import { getCockpitService, EventFilter, EventType } from '../services/cockpitService';
 
 // Configuration interfaces
@@ -88,12 +89,19 @@ export const SafetyCockpitConfig: React.FC = () => {
   const loadConfiguration = async () => {
     setIsLoading(true);
     try {
-      // In a real implementation, this would fetch from the backend
-      const response = await fetch('/api/safety-cockpit/config');
-      if (response.ok) {
-        const data = await response.json();
-        setConfig(data);
-      }
+      // Load Opik configuration from the new API
+      const opikConfig = await opikService.getConfig();
+      setConfig(prev => ({
+        ...prev,
+        opik: {
+          enabled: opikConfig.enabled,
+          api_key: '', // Don't show API key
+          project_name: opikConfig.project_name,
+          batch_size: opikConfig.batch_size,
+          flush_interval: opikConfig.flush_interval,
+          base_url: opikConfig.base_url
+        }
+      }));
     } catch (error) {
       console.error('Failed to load configuration:', error);
     } finally {
@@ -104,21 +112,15 @@ export const SafetyCockpitConfig: React.FC = () => {
   const saveConfiguration = async () => {
     setSaveStatus('saving');
     try {
-      // In a real implementation, this would save to the backend
-      const response = await fetch('/api/safety-cockpit/config', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(config)
+      // Save Opik configuration using the new API
+      await opikService.updateConfig({
+        enabled: config.opik.enabled,
+        batch_size: config.opik.batch_size,
+        flush_interval: config.opik.flush_interval
       });
 
-      if (response.ok) {
-        setSaveStatus('saved');
-        setTimeout(() => setSaveStatus('idle'), 2000);
-      } else {
-        setSaveStatus('error');
-      }
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000);
     } catch (error) {
       console.error('Failed to save configuration:', error);
       setSaveStatus('error');
@@ -171,23 +173,10 @@ export const SafetyCockpitConfig: React.FC = () => {
 
   const testConnection = async () => {
     try {
-      const response = await fetch('/api/safety-cockpit/test-connection', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ opik: config.opik })
-      });
-
-      const result = await response.json();
-      
-      if (result.success) {
-        alert('Connection test successful!');
-      } else {
-        alert(`Connection test failed: ${result.error}`);
-      }
+      const result = await opikService.testConnection();
+      alert(`Connection test successful!\nProject: ${result.project}\nTrace ID: ${result.trace_id}`);
     } catch (error) {
-      alert(`Connection test failed: ${error}`);
+      alert(`Connection test failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 

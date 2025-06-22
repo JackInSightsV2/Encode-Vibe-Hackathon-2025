@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -13,7 +14,10 @@ import (
 	"qt1-middleware/metrics"
 	"qt1-middleware/moderation"
 	"qt1-middleware/moderation/layers"
+	"qt1-middleware/opik"
 	"qt1-middleware/utils"
+
+	"github.com/sashabaranov/go-openai"
 )
 
 type ChatRequest struct {
@@ -30,12 +34,30 @@ type ChatResponse struct {
 	Reason  string `json:"reason,omitempty"`
 }
 
+// ModerationEngineInterface defines the interface that both regular and Opik engines must implement
+type ModerationEngineInterface interface {
+	IsEnabled() bool
+	Moderate(content string, context moderation.ModerationContext) (*moderation.AggregatedResult, error)
+	GetStats() moderation.ModerationStats
+	GetLayerNames() []string
+	GetEnabledLayers() []moderation.ModerationLayer
+	GetLayerInfo(layerName string) (weight float64, enabled bool, found bool)
+	GetConfig() *moderation.AdvancedModerationConfig
+	RegisterLayer(layer moderation.ModerationLayer) error
+	SetLayers(layers []moderation.ModerationLayer)
+	ReloadConfig() error
+	Close()
+}
+
+// Proxy handles HTTP requests and routes them through moderation layers
 type Proxy struct {
 	client                  *http.Client
 	promptInjectionDetector *PromptInjectionDetector
 	providerRouter          *ProviderRouter
 	sdkRouter               *SDKProviderRouter
-	moderationEngine        *moderation.ModerationEngine
+	moderationEngine        ModerationEngineInterface
+	moderationEngineOpik    *moderation.EngineWithOpik
+	opikClient              *opik.OpikClient
 }
 
 // GetSDKRouter returns the SDK router instance
@@ -45,18 +67,23 @@ func (p *Proxy) GetSDKRouter() *SDKProviderRouter {
 
 func NewProxy() *Proxy {
 	p := &Proxy{
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		client:                  &http.Client{Timeout: time.Second * 30},
 		promptInjectionDetector: NewPromptInjectionDetector(),
 		providerRouter:          NewProviderRouter(),
 		sdkRouter:               NewSDKProviderRouter(),
 	}
 	
-	// Initialize advanced moderation engine
 	p.initModerationEngine()
-	
 	return p
+}
+
+// SetOpikClient sets the Opik client for the proxy
+func (p *Proxy) SetOpikClient(client *opik.OpikClient) {
+	fmt.Printf("DEBUG: SetOpikClient called - client nil? %t\n", client == nil)
+	p.opikClient = client
+	if client != nil {
+		fmt.Printf("DEBUG: Opik client set successfully for logging moderation results\n")
+	}
 }
 
 func (p *Proxy) HandleChat(w http.ResponseWriter, r *http.Request) {
@@ -342,6 +369,8 @@ func isAnthropicModel(model string) bool {
 
 // initModerationEngine initializes the advanced moderation engine
 func (p *Proxy) initModerationEngine() {
+	fmt.Printf("DEBUG: initModerationEngine called - opikClient nil? %t\n", p.opikClient == nil)
+	
 	// Check if advanced moderation is enabled
 	if !config.AppConfig.Moderation.Advanced.Enabled {
 		log.Printf("Advanced moderation disabled, using legacy moderation")
@@ -377,6 +406,75 @@ func (p *Proxy) initModerationEngine() {
 		},
 	}
 	
+	// Convert to config format for EngineWithOpik
+	opikModerationConfig := config.AdvancedModerationConfig{
+		Enabled: moderationConfig.Enabled,
+		Layers: convertToAppLayerConfigs(moderationConfig.Layers),
+		Thresholds: config.ThresholdConfig{
+			Low:      moderationConfig.Thresholds.Low,
+			Medium:   moderationConfig.Thresholds.Medium,
+			High:     moderationConfig.Thresholds.High,
+			Critical: moderationConfig.Thresholds.Critical,
+		},
+		Actions: config.ActionConfig{
+			Low:      moderationConfig.Actions.Low,
+			Medium:   moderationConfig.Actions.Medium,
+			High:     moderationConfig.Actions.High,
+			Critical: moderationConfig.Actions.Critical,
+		},
+		Cache: config.CacheConfig{
+			Enabled:    moderationConfig.Cache.Enabled,
+			TTLMinutes: moderationConfig.Cache.TTLMinutes,
+			MaxEntries: moderationConfig.Cache.MaxEntries,
+		},
+		Analytics: config.AnalyticsConfig{
+			Enabled:           moderationConfig.Analytics.Enabled,
+			CollectDetails:    moderationConfig.Analytics.CollectDetails,
+			RetentionDays:     moderationConfig.Analytics.RetentionDays,
+			EnablePerformance: moderationConfig.Analytics.EnablePerformance,
+		},
+	}
+	
+	// If Opik client is available, use the Opik-enabled engine
+	if p.opikClient != nil {
+		fmt.Printf("DEBUG: Using Opik-enabled engine path\n")
+		log.Printf("Initializing Opik-enabled moderation engine")
+		
+		// Initialize OpenAI client for LLM layers if needed
+		var openaiClient *openai.Client
+		if openaiProvider, exists := config.AppConfig.Providers["openai"]; exists && openaiProvider.APIKey != "" {
+			openaiClient = openai.NewClient(openaiProvider.APIKey)
+		}
+		
+		engine, err := moderation.NewEngineWithOpik(opikModerationConfig, p.opikClient, openaiClient)
+		if err != nil {
+			log.Printf("Failed to create Opik-enabled moderation engine: %v", err)
+			// Fall back to regular engine
+			p.initRegularModerationEngine(moderationConfig)
+			return
+		}
+		
+		p.moderationEngineOpik = engine
+		
+		// Set global instance for API handlers - we'll use a wrapper to make it compatible
+		wrapperEngine := &ModerationEngineWrapper{opikEngine: engine}
+		api.ModerationEngineInstance = wrapperEngine
+		
+		// IMPORTANT: Set the moderationEngine field to the wrapper so runModeration uses it
+		p.moderationEngine = wrapperEngine
+		
+		log.Printf("Opik-enabled moderation engine initialized and set as primary engine")
+		return
+	}
+	
+	// Fall back to regular moderation engine
+	fmt.Printf("DEBUG: Using regular engine fallback (no Opik client)\n")
+	log.Printf("Initializing regular moderation engine (no Opik client)")
+	p.initRegularModerationEngine(moderationConfig)
+}
+
+// initRegularModerationEngine initializes the regular moderation engine
+func (p *Proxy) initRegularModerationEngine(moderationConfig *moderation.AdvancedModerationConfig) {
 	// Create moderation engine with our config
 	cache := moderation.NewModerationCache(moderationConfig.Cache)
 	configManager := moderation.NewConfigManager("") // Empty path since we're providing config directly
@@ -480,7 +578,7 @@ func (p *Proxy) initModerationEngine() {
 	// Set global instance for API handlers
 	api.ModerationEngineInstance = engine
 	
-	log.Printf("Advanced moderation engine initialized with %d layers", len(engine.GetLayerNames()))
+	log.Printf("Regular moderation engine initialized with %d layers", len(engine.GetLayerNames()))
 }
 
 // runModeration runs content through moderation (advanced or legacy)
@@ -492,10 +590,15 @@ func (p *Proxy) runModeration(req ChatRequestExtended) (bool, string) {
 	
 	// Try advanced moderation first
 	if p.moderationEngine != nil && p.moderationEngine.IsEnabled() {
+		// Generate a unique request ID for this moderation request
+		requestID := fmt.Sprintf("%s-%s-%d", req.UserID, req.SessionID, time.Now().UnixNano())
+		
 		context := moderation.ModerationContext{
 			UserID:    req.UserID,
 			SessionID: req.SessionID,
+			RequestID: requestID,
 			Timestamp: time.Now(),
+			Metadata:  map[string]interface{}{"endpoint": "/chat"},
 		}
 		
 		result, err := p.moderationEngine.Moderate(req.Message, context)
@@ -503,6 +606,11 @@ func (p *Proxy) runModeration(req ChatRequestExtended) (bool, string) {
 			log.Printf("Advanced moderation failed: %v", err)
 			log.Printf("Falling back to legacy moderation")
 		} else {
+			// Add Opik logging step - log the moderation result to Opik
+			if p.opikClient != nil {
+				go p.logModerationToOpik(req.Message, context, result)
+			}
+			
 			// Broadcast moderation events via WebSocket
 			p.broadcastModerationEvent(result, req)
 			
@@ -693,4 +801,151 @@ func convertLayerConfigs(appLayers []config.AdvancedLayerConfig) []moderation.La
 		}
 	}
 	return layers
+}
+
+// convertToAppLayerConfigs converts moderation layer configs to app config layer configs
+func convertToAppLayerConfigs(moderationLayers []moderation.LayerConfig) []config.AdvancedLayerConfig {
+	layers := make([]config.AdvancedLayerConfig, len(moderationLayers))
+	for i, layer := range moderationLayers {
+		layers[i] = config.AdvancedLayerConfig{
+			Name:      layer.Name,
+			Enabled:   layer.Enabled,
+			Weight:    layer.Weight,
+			Threshold: layer.Threshold,
+			Options:   layer.Options,
+		}
+	}
+	return layers
+}
+
+// ModerationEngineWrapper wraps the Opik-enabled engine to make it compatible with the regular engine interface
+type ModerationEngineWrapper struct {
+	opikEngine *moderation.EngineWithOpik
+}
+
+func (w *ModerationEngineWrapper) GetStats() moderation.ModerationStats {
+	return w.opikEngine.GetStats()
+}
+
+func (w *ModerationEngineWrapper) GetLayerNames() []string {
+	return w.opikEngine.GetLayerNames()
+}
+
+func (w *ModerationEngineWrapper) GetEnabledLayers() []moderation.ModerationLayer {
+	return w.opikEngine.GetEnabledLayers()
+}
+
+func (w *ModerationEngineWrapper) GetLayerInfo(layerName string) (weight float64, enabled bool, found bool) {
+	return w.opikEngine.GetLayerInfo(layerName)
+}
+
+func (w *ModerationEngineWrapper) IsEnabled() bool {
+	return w.opikEngine.IsEnabled()
+}
+
+func (w *ModerationEngineWrapper) GetConfig() *moderation.AdvancedModerationConfig {
+	return w.opikEngine.GetConfig()
+}
+
+func (w *ModerationEngineWrapper) Moderate(content string, moderationContext moderation.ModerationContext) (*moderation.AggregatedResult, error) {
+	fmt.Printf("DEBUG: ModerationEngineWrapper.Moderate called with content: '%s'\n", content)
+	fmt.Printf("DEBUG: About to call ModerateWithOpik\n")
+	ctx := context.Background()
+	result, err := w.opikEngine.ModerateWithOpik(ctx, content, moderationContext)
+	if err != nil {
+		fmt.Printf("DEBUG: ModerateWithOpik returned error: %v\n", err)
+	} else {
+		fmt.Printf("DEBUG: ModerateWithOpik completed successfully\n")
+	}
+	return result, err
+}
+
+func (w *ModerationEngineWrapper) Close() {
+	w.opikEngine.Close()
+}
+
+func (w *ModerationEngineWrapper) RegisterLayer(layer moderation.ModerationLayer) error {
+	return w.opikEngine.RegisterLayer(layer)
+}
+
+func (w *ModerationEngineWrapper) SetLayers(layers []moderation.ModerationLayer) {
+	w.opikEngine.SetLayers(layers)
+}
+
+func (w *ModerationEngineWrapper) ReloadConfig() error {
+	return w.opikEngine.ReloadConfig()
+}
+
+func (p *Proxy) logModerationToOpik(message string, moderationCtx moderation.ModerationContext, result *moderation.AggregatedResult) {
+	fmt.Printf("DEBUG: logModerationToOpik called for user %s\n", moderationCtx.UserID)
+	
+	if p.opikClient == nil {
+		fmt.Printf("DEBUG: Opik client is nil, skipping logging\n")
+		return
+	}
+	
+	// Create a trace for this moderation request
+	request := opik.ModerationRequest{
+		ID:        moderationCtx.RequestID,
+		Content:   message,
+		UserID:    moderationCtx.UserID,
+		SessionID: moderationCtx.SessionID,
+		IPAddress: moderationCtx.IPAddress,
+		Provider:  "qt1-middleware",
+		Endpoint:  "/chat",
+		Timestamp: moderationCtx.Timestamp,
+	}
+	
+	ctx := context.Background()
+	trace, err := p.opikClient.TraceModeration(ctx, request)
+	if err != nil {
+		fmt.Printf("ERROR: Failed to create Opik trace: %v\n", err)
+		return
+	}
+	
+	fmt.Printf("DEBUG: Created Opik trace %s for moderation\n", trace.ID)
+	
+	// Add spans for each moderation layer that ran
+	for _, layerResult := range result.LayerResults {
+		span := trace.StartSpan(layerResult.LayerName, opik.SpanOptions{
+			Input: map[string]interface{}{
+				"content": message,
+				"layer":   layerResult.LayerName,
+			},
+			Metadata: map[string]interface{}{
+				"span_type": "moderation_layer",
+				"layer_name": layerResult.LayerName,
+			},
+		})
+		
+		// Set span output
+		span.Output = map[string]interface{}{
+			"score":       layerResult.Score,
+			"confidence":  layerResult.Confidence,
+			"blocked":     layerResult.Blocked,
+			"reason":      layerResult.Reason,
+			"category":    layerResult.Category,
+			"process_time": layerResult.ProcessTime.Milliseconds(),
+		}
+		
+		// End the span
+		span.End()
+	}
+	
+	// End the main trace with the final result
+	err = p.opikClient.EndTrace(trace, map[string]interface{}{
+		"allowed":        !result.FinalDecision,
+		"final_score":    result.FinalScore,
+		"severity":       result.Severity,
+		"action":         result.Action,
+		"layers_checked": len(result.LayerResults),
+		"cache_hit":      result.CacheHit,
+		"total_process_time": result.ProcessTime.Milliseconds(),
+	})
+	
+	if err != nil {
+		fmt.Printf("ERROR: Failed to end Opik trace: %v\n", err)
+	} else {
+		fmt.Printf("DEBUG: Successfully logged moderation to Opik trace %s\n", trace.ID)
+	}
 }

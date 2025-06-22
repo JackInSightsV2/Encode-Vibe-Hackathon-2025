@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
-// API Configuration
-const API_BASE_URL = 'http://localhost:8080/api';
+// API Configuration - Use relative URL for production deployment
+const API_BASE_URL = `${window.location.protocol}//${window.location.host}/api`;
 
 // Types
 interface User {

@@ -198,9 +198,8 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, onShowRegister }) => {
         {/* Demo Credentials */}
         <div className="mt-4 p-3 bg-slate-50 rounded-lg border border-slate-200">
           <p className="text-xs text-slate-600 mb-2 font-medium">Demo Credentials:</p>
-          <div className="text-xs text-slate-500 space-y-1">
-            <div>Admin: <code className="bg-white px-1 py-0.5 rounded">admin / admin123</code></div>
-            <div>User: <code className="bg-white px-1 py-0.5 rounded">user / user123</code></div>
+          <div className="text-xs text-slate-500">
+            <div>Admin: <code className="bg-white px-1 py-0.5 rounded">admin / AdminPassword123!</code></div>
           </div>
         </div>
       </div>

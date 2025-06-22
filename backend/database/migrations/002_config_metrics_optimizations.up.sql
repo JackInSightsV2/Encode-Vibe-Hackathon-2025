@@ -3,11 +3,18 @@
 
 -- Fix the system_config table structure to match our model
 ALTER TABLE system_config ADD COLUMN id INTEGER;
-ALTER TABLE system_config ADD COLUMN value_type VARCHAR(20) DEFAULT 'string';
-ALTER TABLE system_config ADD COLUMN is_secret BOOLEAN DEFAULT false;
-ALTER TABLE system_config ADD COLUMN read_only BOOLEAN DEFAULT false;
-ALTER TABLE system_config ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP;
-ALTER TABLE system_config ADD COLUMN version INTEGER DEFAULT 1;
+ALTER TABLE system_config ADD COLUMN value_type VARCHAR(20);
+ALTER TABLE system_config ADD COLUMN is_secret BOOLEAN;
+ALTER TABLE system_config ADD COLUMN read_only BOOLEAN;
+ALTER TABLE system_config ADD COLUMN created_at DATETIME;
+ALTER TABLE system_config ADD COLUMN version INTEGER;
+
+-- Set defaults for new columns using UPDATE statements
+UPDATE system_config SET value_type = 'string' WHERE value_type IS NULL;
+UPDATE system_config SET is_secret = false WHERE is_secret IS NULL;
+UPDATE system_config SET read_only = false WHERE read_only IS NULL;
+UPDATE system_config SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL;
+UPDATE system_config SET version = 1 WHERE version IS NULL;
 
 -- Rename columns to match our model
 ALTER TABLE system_config RENAME COLUMN data_type TO value_type_old;
@@ -19,9 +26,13 @@ UPDATE system_config SET is_secret = COALESCE(is_secret_old, false);
 
 -- Fix the metrics table structure to match our model
 ALTER TABLE metrics ADD COLUMN name VARCHAR(100);
-ALTER TABLE metrics ADD COLUMN source VARCHAR(50) DEFAULT 'system';
-ALTER TABLE metrics ADD COLUMN collected_at DATETIME DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE metrics ADD COLUMN source VARCHAR(50);
+ALTER TABLE metrics ADD COLUMN collected_at DATETIME;
 ALTER TABLE metrics ADD COLUMN labels TEXT;
+
+-- Set defaults for new metrics columns
+UPDATE metrics SET source = 'system' WHERE source IS NULL;
+UPDATE metrics SET collected_at = CURRENT_TIMESTAMP WHERE collected_at IS NULL;
 
 -- Update the name column from metric_name
 UPDATE metrics SET name = metric_name WHERE name IS NULL;

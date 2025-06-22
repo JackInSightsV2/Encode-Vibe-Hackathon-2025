@@ -12,6 +12,7 @@ const MetricsDashboard = lazy(() => import('./components/MetricsDashboard'))
 const UserManagement = lazy(() => import('./components/UserManagement'))
 const APIKeyManagement = lazy(() => import('./components/APIKeyManagement'))
 const OptimizerDashboard = lazy(() => import('./components/OptimizerDashboard'))
+const OpikAnalyticsDashboard = lazy(() => import('./components/OpikAnalyticsDashboard'))
 const RateLimitingDashboard = lazy(() => import('./components/RateLimitingDashboard'))
 const IPProtectionManager = lazy(() => import('./components/IPProtectionManager'))
 const DDoSProtectionDashboard = lazy(() => import('./components/DDoSProtectionDashboard'))
@@ -25,7 +26,7 @@ import { WebSocketProvider } from './contexts/WebSocketContext'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { CompactThemeSelector, AnnouncementsProvider } from './components/ui'
 
-type Page = 'dashboard' | 'metrics' | 'advanced-config' | 'rules' | 'playground' | 'tester' | 'logs' | 'killswitch' | 'docs' | 'users' | 'api-keys' | 'optimizer' | 'rate-limiting' | 'ip-protection' | 'ddos-protection'
+type Page = 'dashboard' | 'metrics' | 'advanced-config' | 'rules' | 'playground' | 'tester' | 'logs' | 'killswitch' | 'docs' | 'users' | 'api-keys' | 'optimizer' | 'opik-analytics' | 'rate-limiting' | 'ip-protection' | 'ddos-protection'
 
 // Main App component wrapped with authentication
 function AppContent() {
@@ -146,6 +147,14 @@ function AppContent() {
             </Suspense>
           </ProtectedRoute>
         )
+      case 'opik-analytics':
+        return (
+          <ProtectedRoute permission="config:read">
+            <Suspense fallback={<LoadingSpinner />}>
+              <OpikAnalyticsDashboard />
+            </Suspense>
+          </ProtectedRoute>
+        )
       case 'rate-limiting':
         return (
           <ProtectedRoute permission="security:read">
@@ -181,6 +190,7 @@ function AppContent() {
     
     const mainBarItems: NavItem[] = [
       { id: 'dashboard', label: 'Dashboard', icon: '📊', permission: null },
+      { id: 'opik-analytics', label: 'Opik Analytics', icon: '🚀', permission: 'config:read' },
       { id: 'docs', label: 'Documentation', icon: '📚', permission: null },
     ];
 

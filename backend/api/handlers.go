@@ -17,8 +17,10 @@ import (
 	"qt1-middleware/metrics"
 	"qt1-middleware/moderation"
 	"qt1-middleware/models"
+	"qt1-middleware/providers"
 	"qt1-middleware/repositories"
 	"qt1-middleware/utils"
+	"qt1-middleware/opik"
 )
 
 // Package-level variable to store proxy instance for config reloading
@@ -27,8 +29,21 @@ var ProxyInstance interface {
 }
 
 // Global instances for handlers to access
-var ModerationEngineInstance *moderation.ModerationEngine
+var ModerationEngineInstance interface {
+	GetStats() moderation.ModerationStats
+	GetLayerNames() []string
+	GetEnabledLayers() []moderation.ModerationLayer
+	GetLayerInfo(layerName string) (weight float64, enabled bool, found bool)
+	IsEnabled() bool
+	GetConfig() *moderation.AdvancedModerationConfig
+	Moderate(content string, context moderation.ModerationContext) (*moderation.AggregatedResult, error)
+	Close()
+	RegisterLayer(layer moderation.ModerationLayer) error
+	SetLayers(layers []moderation.ModerationLayer)
+	ReloadConfig() error
+}
 var MetricsCollectorInstance *metrics.MetricsCollector
+var OpikClientInstance *opik.OpikClient
 
 // Global DDoS middleware instance - using interface to avoid import cycle
 var DDoSMiddlewareInstance interface {
@@ -50,6 +65,11 @@ var DB *database.Database
 // SetDatabase sets the global database instance
 func SetDatabase(db *database.Database) {
 	DB = db
+}
+
+// SetOpikClient sets the global Opik client instance
+func SetOpikClient(client *opik.OpikClient) {
+	OpikClientInstance = client
 }
 
 // SetDDoSMiddleware sets the global DDoS middleware instance
@@ -2773,17 +2793,1037 @@ func generateAIReasoning(content string, score float64) string {
 
 // Helper function to safely extract values from interface{} maps
 func getInterfaceValue(m map[string]interface{}, key string, defaultValue int) int {
-	if val, exists := m[key]; exists {
-		switch v := val.(type) {
-		case int:
-			return v
-		case int64:
-			return int(v)
-		case float64:
-			return int(v)
-		case float32:
-			return int(v)
+	if val, ok := m[key]; ok {
+		if intVal, ok := val.(int); ok {
+			return intVal
+		}
+		if floatVal, ok := val.(float64); ok {
+			return int(floatVal)
 		}
 	}
 	return defaultValue
+}
+
+// ===== OPIK INTEGRATION ENDPOINTS =====
+
+// HandleOpikStatus returns the current status of Opik integration
+func HandleOpikStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	status := map[string]interface{}{
+		"enabled":     config.AppConfig.Opik.Enabled,
+		"connected":   OpikClientInstance != nil,
+		"project":     config.AppConfig.Opik.ProjectName,
+		"base_url":    config.AppConfig.Opik.BaseURL,
+		"batch_size":  config.AppConfig.Opik.BatchSize,
+		"flush_interval": config.AppConfig.Opik.FlushInterval.String(),
+		"tracing": map[string]interface{}{
+			"enabled":          config.AppConfig.Opik.Tracing.Enabled,
+			"sample_rate":      config.AppConfig.Opik.Tracing.SampleRate,
+			"trace_moderation": config.AppConfig.Opik.Tracing.TraceModeration,
+			"trace_providers":  config.AppConfig.Opik.Tracing.TraceProviders,
+			"trace_security":   config.AppConfig.Opik.Tracing.TraceSecurity,
+		},
+		"evaluations": map[string]interface{}{
+			"enabled":    config.AppConfig.Opik.Evaluations.Enabled,
+			"run_async":  config.AppConfig.Opik.Evaluations.RunAsync,
+			"timeout":    config.AppConfig.Opik.Evaluations.Timeout.String(),
+			"evaluators": config.AppConfig.Opik.Evaluations.Evaluators,
+		},
+	}
+
+	sendSuccessResponse(w, status)
+}
+
+// HandleOpikTraces returns recent traces from Opik
+func HandleOpikTraces(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	if OpikClientInstance == nil {
+		sendErrorResponse(w, http.StatusServiceUnavailable, "Opik client not available")
+		return
+	}
+
+	// Fetch real traces from Opik API
+	traces, err := fetchTracesFromOpik()
+	if err != nil {
+		log.Printf("Failed to fetch traces from Opik: %v", err)
+		// Return empty array instead of error to avoid breaking the frontend
+		sendSuccessResponse(w, []map[string]interface{}{})
+		return
+	}
+
+	sendSuccessResponse(w, traces)
+}
+
+// fetchTracesFromOpik fetches recent traces from the Opik API
+func fetchTracesFromOpik() ([]map[string]interface{}, error) {
+	if OpikClientInstance == nil {
+		return nil, fmt.Errorf("Opik client not available")
+	}
+
+	// Get workspace from environment
+	workspace := os.Getenv("OPIK_WORKSPACE")
+	if workspace == "" {
+		workspace = "jisencodevibehackathon2025" // fallback to known workspace
+	}
+
+	// Use the correct Opik API endpoint for fetching traces with project ID
+	projectID := "0197953f-6f15-73ab-8536-ad0b48e0c67c" // Default Project ID from Opik
+	url := fmt.Sprintf("https://www.comet.com/opik/api/v1/private/traces?project_id=%s&size=50", projectID)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set proper headers for Opik Cloud API
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Comet-Workspace", workspace)
+	req.Header.Set("authorization", config.AppConfig.Opik.APIKey)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch traces: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var opikResponse struct {
+		Content []map[string]interface{} `json:"content"`
+		Page    int                      `json:"page"`
+		Size    int                      `json:"size"`
+		Total   int                      `json:"total"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&opikResponse); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	// Transform Opik traces to our expected format
+	traces := make([]map[string]interface{}, len(opikResponse.Content))
+	for i, trace := range opikResponse.Content {
+		traces[i] = transformOpikTrace(trace)
+	}
+
+	return traces, nil
+}
+
+// transformOpikTrace transforms an Opik trace to our expected format
+func transformOpikTrace(opikTrace map[string]interface{}) map[string]interface{} {
+	trace := map[string]interface{}{
+		"id":     opikTrace["id"],
+		"name":   opikTrace["name"],
+		"status": "completed",
+	}
+
+	// Handle timestamps
+	if startTime, ok := opikTrace["start_time"].(string); ok {
+		if parsed, err := time.Parse(time.RFC3339, startTime); err == nil {
+			trace["start_time"] = parsed
+		}
+	}
+	if endTime, ok := opikTrace["end_time"].(string); ok {
+		if parsed, err := time.Parse(time.RFC3339, endTime); err == nil {
+			trace["end_time"] = parsed
+		}
+	}
+
+	// Calculate duration if both timestamps are available
+	if startTime, okStart := trace["start_time"].(time.Time); okStart {
+		if endTime, okEnd := trace["end_time"].(time.Time); okEnd {
+			duration := endTime.Sub(startTime)
+			trace["duration"] = duration.String()
+		}
+	}
+
+	// Handle input/output
+	if input, ok := opikTrace["input"].(map[string]interface{}); ok {
+		trace["input"] = input
+	}
+	if output, ok := opikTrace["output"].(map[string]interface{}); ok {
+		trace["output"] = output
+	}
+
+	// Add span count if available
+	if spanCount, ok := opikTrace["span_count"].(float64); ok {
+		trace["spans"] = int(spanCount)
+	} else {
+		trace["spans"] = 0
+	}
+
+	return trace
+}
+
+// HandleOpikEvaluations returns evaluation results from Opik
+func HandleOpikEvaluations(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	if OpikClientInstance == nil {
+		sendErrorResponse(w, http.StatusServiceUnavailable, "Opik client not available")
+		return
+	}
+
+	// Mock evaluation data for now
+	evaluations := map[string]interface{}{
+		"regex_effectiveness": map[string]interface{}{
+			"score":       0.87,
+			"trend":       "+2.3%",
+			"last_update": time.Now().Add(-10*time.Minute),
+			"details": map[string]interface{}{
+				"total_tests":     150,
+				"passed":          131,
+				"failed":          19,
+				"avg_confidence":  0.84,
+			},
+		},
+		"llm_accuracy": map[string]interface{}{
+			"score":       0.94,
+			"trend":       "+1.1%",
+			"last_update": time.Now().Add(-15*time.Minute),
+			"details": map[string]interface{}{
+				"total_tests":     200,
+				"passed":          188,
+				"failed":          12,
+				"avg_confidence":  0.91,
+			},
+		},
+		"pii_coverage": map[string]interface{}{
+			"score":       0.98,
+			"trend":       "0%",
+			"last_update": time.Now().Add(-20*time.Minute),
+			"details": map[string]interface{}{
+				"total_tests":     75,
+				"passed":          74,
+				"failed":          1,
+				"avg_confidence":  0.96,
+			},
+		},
+		"false_positive_rate": map[string]interface{}{
+			"score":       0.05,
+			"trend":       "-0.8%",
+			"last_update": time.Now().Add(-5*time.Minute),
+			"details": map[string]interface{}{
+				"total_tests":     500,
+				"false_positives": 25,
+				"true_negatives":  475,
+				"rate":            0.05,
+			},
+		},
+		"response_time": map[string]interface{}{
+			"score":       12.3,
+			"trend":       "-2.1ms",
+			"last_update": time.Now().Add(-2*time.Minute),
+			"details": map[string]interface{}{
+				"avg_ms":   12.3,
+				"min_ms":   8.1,
+				"max_ms":   28.7,
+				"p95_ms":   19.2,
+			},
+		},
+	}
+
+	sendSuccessResponse(w, evaluations)
+}
+
+// HandleOpikConfig handles Opik configuration updates
+func HandleOpikConfig(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		opikConfig := map[string]interface{}{
+			"enabled":        config.AppConfig.Opik.Enabled,
+			"project_name":   config.AppConfig.Opik.ProjectName,
+			"batch_size":     config.AppConfig.Opik.BatchSize,
+			"flush_interval": config.AppConfig.Opik.FlushInterval.String(),
+			"base_url":       config.AppConfig.Opik.BaseURL,
+			"tracing":        config.AppConfig.Opik.Tracing,
+			"evaluations":    config.AppConfig.Opik.Evaluations,
+		}
+		sendSuccessResponse(w, opikConfig)
+
+	case "PUT":
+		var opikConfig map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&opikConfig); err != nil {
+			sendErrorResponse(w, http.StatusBadRequest, "Invalid JSON")
+			return
+		}
+
+		updateOpikConfig(opikConfig)
+		sendSuccessResponse(w, map[string]string{"message": "Opik configuration updated successfully"})
+
+	default:
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+	}
+}
+
+// HandleOpikTestConnection tests the connection to Opik
+func HandleOpikTestConnection(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	if OpikClientInstance == nil {
+		sendErrorResponse(w, http.StatusServiceUnavailable, "Opik client not available")
+		return
+	}
+
+	// Create a test trace to verify connectivity
+	ctx := context.Background()
+	trace, err := OpikClientInstance.StartTrace(ctx, "connection_test", opik.TraceOptions{
+		Input: map[string]interface{}{
+			"test":      true,
+			"timestamp": time.Now(),
+		},
+		Metadata: map[string]interface{}{
+			"source": "frontend_test",
+		},
+		Tags: []string{"test", "connection"},
+	})
+
+	if err != nil {
+		sendErrorResponse(w, http.StatusInternalServerError, fmt.Sprintf("Failed to create test trace: %v", err))
+		return
+	}
+
+	// End the trace immediately
+	err = OpikClientInstance.EndTrace(trace, map[string]interface{}{
+		"success": true,
+		"message": "Connection test completed",
+	})
+
+	if err != nil {
+		sendErrorResponse(w, http.StatusInternalServerError, fmt.Sprintf("Failed to end test trace: %v", err))
+		return
+	}
+
+	result := map[string]interface{}{
+		"connected":  true,
+		"trace_id":   trace.ID,
+		"project":    config.AppConfig.Opik.ProjectName,
+		"timestamp":  time.Now(),
+		"message":    "Connection test successful",
+	}
+
+	sendSuccessResponse(w, result)
+}
+
+// ===== REGEX AI CONFIGURATION ENDPOINTS =====
+
+// Global AI configuration storage (in production, this would be stored in database)
+var regexAIConfig = map[string]interface{}{
+	"ai_enabled":             false,
+	"provider":               "",
+	"model":                  "",
+	"api_key":                "",
+	"endpoint":               "",
+	"max_tokens":             1024,
+	"temperature":            0.2,
+	"detect_misspellings":    true,
+	"detect_synonyms":        true,
+	"detect_obfuscation":     true,
+	"contextual_analysis":    true,
+	"confidence_threshold":   0.8,
+	"system_prompt":          "Analyze the following content for variations, misspellings, and synonyms of banned words that regex patterns might miss. Focus on detecting attempts to bypass word filters.",
+}
+
+// HandleRegexAIProvider manages AI provider configuration for regex enhancement
+func HandleRegexAIProvider(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		// Return current configuration (without exposing API key)
+		response := make(map[string]interface{})
+		for k, v := range regexAIConfig {
+			if k == "api_key" {
+				response["api_key_set"] = v.(string) != ""
+			} else {
+				response[k] = v
+			}
+		}
+		sendSuccessResponse(w, response)
+		
+	case http.MethodPost:
+		var req struct {
+			AIEnabled             bool    `json:"ai_enabled"`
+			Provider              string  `json:"provider"`
+			Model                 string  `json:"model"`
+			APIKey                string  `json:"api_key"`
+			Endpoint              string  `json:"endpoint"`
+			MaxTokens             int     `json:"max_tokens"`
+			Temperature           float64 `json:"temperature"`
+			DetectMisspellings    bool    `json:"detect_misspellings"`
+			DetectSynonyms        bool    `json:"detect_synonyms"`
+			DetectObfuscation     bool    `json:"detect_obfuscation"`
+			ContextualAnalysis    bool    `json:"contextual_analysis"`
+			ConfidenceThreshold   float64 `json:"confidence_threshold"`
+			SystemPrompt          string  `json:"system_prompt"`
+		}
+		
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			sendErrorResponse(w, http.StatusBadRequest, "Invalid JSON payload")
+			return
+		}
+		
+		// Validate configuration
+		if req.AIEnabled {
+			if req.Provider == "" {
+				sendErrorResponse(w, http.StatusBadRequest, "Provider is required when AI is enabled")
+				return
+			}
+			if req.Model == "" {
+				sendErrorResponse(w, http.StatusBadRequest, "Model is required when AI is enabled")
+				return
+			}
+			if req.APIKey == "" {
+				sendErrorResponse(w, http.StatusBadRequest, "API key is required when AI is enabled")
+				return
+			}
+		}
+		
+		// Save configuration
+		regexAIConfig["ai_enabled"] = req.AIEnabled
+		regexAIConfig["provider"] = req.Provider
+		regexAIConfig["model"] = req.Model
+		regexAIConfig["api_key"] = req.APIKey
+		regexAIConfig["endpoint"] = req.Endpoint
+		regexAIConfig["max_tokens"] = req.MaxTokens
+		regexAIConfig["temperature"] = req.Temperature
+		regexAIConfig["detect_misspellings"] = req.DetectMisspellings
+		regexAIConfig["detect_synonyms"] = req.DetectSynonyms
+		regexAIConfig["detect_obfuscation"] = req.DetectObfuscation
+		regexAIConfig["contextual_analysis"] = req.ContextualAnalysis
+		regexAIConfig["confidence_threshold"] = req.ConfidenceThreshold
+		regexAIConfig["system_prompt"] = req.SystemPrompt
+		
+		response := map[string]interface{}{
+			"message": "Regex AI provider configuration saved successfully",
+			"config": map[string]interface{}{
+				"ai_enabled":             req.AIEnabled,
+				"provider":               req.Provider,
+				"model":                  req.Model,
+				"api_key_set":            req.APIKey != "",
+				"endpoint":               req.Endpoint,
+				"max_tokens":             req.MaxTokens,
+				"temperature":            req.Temperature,
+				"detect_misspellings":    req.DetectMisspellings,
+				"detect_synonyms":        req.DetectSynonyms,
+				"detect_obfuscation":     req.DetectObfuscation,
+				"contextual_analysis":    req.ContextualAnalysis,
+				"confidence_threshold":   req.ConfidenceThreshold,
+				"system_prompt":          req.SystemPrompt,
+			},
+		}
+		sendSuccessResponse(w, response)
+		
+	default:
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+	}
+}
+
+// HandleRegexAITest tests AI provider connectivity for regex enhancement
+func HandleRegexAITest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	
+	var req struct {
+		Content  string `json:"content"`
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+		APIKey   string `json:"api_key"`
+	}
+	
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendErrorResponse(w, http.StatusBadRequest, "Invalid JSON payload")
+		return
+	}
+	
+	if req.Content == "" {
+		sendErrorResponse(w, http.StatusBadRequest, "Content is required")
+		return
+	}
+	
+	// Check if AI is enabled and configured
+	aiEnabled, _ := regexAIConfig["ai_enabled"].(bool)
+	if !aiEnabled {
+		// Fall back to simulation if AI is not enabled
+		matches := simulateRegexAIMatches(req.Content)
+		sendSuccessResponse(w, map[string]interface{}{
+			"detected":      len(matches) > 0,
+			"matches":       matches,
+			"confidence":    0.87,
+			"provider":      "simulated",
+			"model":         "simulated",
+			"response_time": "50ms",
+			"tokens_used":   0,
+			"method":        "Simulated",
+			"status":        "simulated",
+		})
+		return
+	}
+	
+	// Use real AI provider
+	startTime := time.Now()
+	result, err := callAIForRegexDetection(req.Content, req.Provider, req.Model, req.APIKey)
+	responseTime := time.Since(startTime)
+	
+	if err != nil {
+		// Fall back to simulation on error
+		log.Printf("AI provider error for regex detection: %v", err)
+		matches := simulateRegexAIMatches(req.Content)
+		sendSuccessResponse(w, map[string]interface{}{
+			"detected":      len(matches) > 0,
+			"matches":       matches,
+			"confidence":    0.87,
+			"provider":      req.Provider,
+			"model":         req.Model,
+			"response_time": responseTime.String(),
+			"tokens_used":   0,
+			"method":        "Fallback (AI Error)",
+			"status":        "error_fallback",
+			"error":         err.Error(),
+		})
+		return
+	}
+	
+	result["provider"] = req.Provider
+	result["model"] = req.Model
+	result["response_time"] = responseTime.String()
+	result["method"] = "AI Enhanced"
+	result["status"] = "live"
+	
+	sendSuccessResponse(w, result)
+}
+
+// Helper function to simulate regex AI matching
+func simulateRegexAIMatches(content string) []map[string]interface{} {
+	content = strings.ToLower(content)
+	matches := []map[string]interface{}{}
+	
+	// Simulate finding variations of banned words
+	variations := map[string][]string{
+		"violence": {"violent", "violance", "v1olence", "v!olence"},
+		"hate":     {"h8", "h@te", "haet", "hatred"},
+		"spam":     {"sp@m", "sp4m", "spamm", "spamming"},
+	}
+	
+	for word, variants := range variations {
+		for _, variant := range variants {
+			if strings.Contains(content, variant) {
+				matches = append(matches, map[string]interface{}{
+					"pattern":    word,
+					"match":      variant,
+					"confidence": 0.85 + (float64(len(matches)) * 0.05),
+					"type":       "ai_detected_variation",
+					"severity":   "medium",
+				})
+			}
+		}
+	}
+	
+	return matches
+}
+
+// callAIForRegexDetection calls the configured AI provider for regex pattern detection
+func callAIForRegexDetection(content, providerName, model, apiKey string) (map[string]interface{}, error) {
+	// Create provider configuration
+	providerConfig := providers.ProviderConfig{
+		Name:    providerName,
+		Type:    getProviderType(providerName),
+		APIKey:  apiKey,
+		Models:  []string{model},
+		Enabled: true,
+	}
+	
+	// Set default base URLs
+	switch providerConfig.Type {
+	case providers.ProviderTypeOpenAI:
+		providerConfig.BaseURL = "https://api.openai.com/v1"
+	case providers.ProviderTypeAnthropic:
+		providerConfig.BaseURL = "https://api.anthropic.com"
+	case providers.ProviderTypeLocal:
+		providerConfig.BaseURL = "http://localhost:11434"
+	}
+	
+	// Create provider instance
+	factory := providers.NewProviderFactory()
+	provider, err := factory.CreateProviderWithConfig(providerConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create provider: %w", err)
+	}
+	
+	// Start provider
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	
+	if err := provider.Start(ctx); err != nil {
+		return nil, fmt.Errorf("failed to start provider: %w", err)
+	}
+	
+	// Prepare the AI request
+	systemPrompt := regexAIConfig["system_prompt"].(string)
+	maxTokens, _ := regexAIConfig["max_tokens"].(int)
+	temperature, _ := regexAIConfig["temperature"].(float64)
+	
+	userPrompt := fmt.Sprintf(`Analyze this content for variations, misspellings, and synonyms of banned words that regex patterns might miss:
+
+Content: "%s"
+
+Please respond with a JSON object containing:
+{
+  "detected": true/false,
+  "matches": [
+    {
+      "word": "original_banned_word",
+      "matched": "variation_found",
+      "position": 0,
+      "confidence": 0.95,
+      "type": "misspelling|synonym|obfuscation"
+    }
+  ],
+  "confidence": 0.87,
+  "tokens_used": 45
+}`, content)
+	
+	chatRequest := &providers.ChatRequest{
+		Model: model,
+		Messages: []providers.ChatMessage{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: userPrompt},
+		},
+		MaxTokens:   maxTokens,
+		Temperature: temperature,
+	}
+	
+	// Make the AI request
+	response, err := provider.SendRequest(ctx, chatRequest)
+	if err != nil {
+		return nil, fmt.Errorf("AI request failed: %w", err)
+	}
+	
+	// Parse the AI response
+	var result map[string]interface{}
+	if err := json.Unmarshal([]byte(response.Message.Content), &result); err != nil {
+		// If JSON parsing fails, create a fallback response
+		log.Printf("Failed to parse AI response as JSON: %v", err)
+		result = map[string]interface{}{
+			"detected":    false,
+			"matches":     []map[string]interface{}{},
+			"confidence":  0.0,
+			"tokens_used": response.Usage.TotalTokens,
+			"raw_response": response.Message.Content,
+		}
+	}
+	
+	// Ensure tokens_used is set
+	if _, exists := result["tokens_used"]; !exists {
+		result["tokens_used"] = response.Usage.TotalTokens
+	}
+	
+	return result, nil
+}
+
+// getProviderType converts provider name to ProviderType
+func getProviderType(providerName string) providers.ProviderType {
+	switch strings.ToLower(providerName) {
+	case "openai":
+		return providers.ProviderTypeOpenAI
+	case "anthropic":
+		return providers.ProviderTypeAnthropic
+	case "local":
+		return providers.ProviderTypeLocal
+	default:
+		return providers.ProviderTypeLocal
+	}
+}
+
+// HandleRegexStats returns statistics for regex layer
+func HandleRegexStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	
+	// TODO: Implement actual regex statistics from database
+	// For now, return simulated stats
+	sendSuccessResponse(w, map[string]interface{}{
+		"patterns_processed": 1247,
+		"patterns_blocked":   89,
+		"average_score":      0.23,
+		"cache_hit_rate":     0.78,
+		"ai_detections":      34,
+		"pattern_detections": 55,
+		"last_updated":       time.Now().Format(time.RFC3339),
+	})
+}
+
+// ===== PII AI CONFIGURATION ENDPOINTS =====
+
+// Global PII AI configuration storage (in production, this would be stored in database)
+var piiAIConfig = map[string]interface{}{
+	"ai_enabled":             false,
+	"provider":               "",
+	"model":                  "",
+	"api_key":                "",
+	"endpoint":               "",
+	"max_tokens":             1024,
+	"temperature":            0.2,
+	"detect_obfuscated":      true,
+	"contextual_analysis":    true,
+	"multilingual":           true,
+	"confidence_threshold":   0.85,
+	"system_prompt":          "Analyze the following content for personally identifiable information (PII) including obfuscated, contextual, and multi-language variations that pattern matching might miss.",
+}
+
+// HandlePiiAIProvider manages AI provider configuration for PII enhancement
+func HandlePiiAIProvider(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		// Return current configuration (without exposing API key)
+		response := make(map[string]interface{})
+		for k, v := range piiAIConfig {
+			if k == "api_key" {
+				response["api_key_set"] = v.(string) != ""
+			} else {
+				response[k] = v
+			}
+		}
+		sendSuccessResponse(w, response)
+		
+	case http.MethodPost:
+		var req struct {
+			AIEnabled             bool    `json:"ai_enabled"`
+			Provider              string  `json:"provider"`
+			Model                 string  `json:"model"`
+			APIKey                string  `json:"api_key"`
+			Endpoint              string  `json:"endpoint"`
+			MaxTokens             int     `json:"max_tokens"`
+			Temperature           float64 `json:"temperature"`
+			DetectObfuscated      bool    `json:"detect_obfuscated"`
+			ContextualAnalysis    bool    `json:"contextual_analysis"`
+			Multilingual          bool    `json:"multilingual"`
+			ConfidenceThreshold   float64 `json:"confidence_threshold"`
+			SystemPrompt          string  `json:"system_prompt"`
+		}
+		
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			sendErrorResponse(w, http.StatusBadRequest, "Invalid JSON payload")
+			return
+		}
+		
+		// Validate configuration
+		if req.AIEnabled {
+			if req.Provider == "" {
+				sendErrorResponse(w, http.StatusBadRequest, "Provider is required when AI is enabled")
+				return
+			}
+			if req.Model == "" {
+				sendErrorResponse(w, http.StatusBadRequest, "Model is required when AI is enabled")
+				return
+			}
+			if req.APIKey == "" {
+				sendErrorResponse(w, http.StatusBadRequest, "API key is required when AI is enabled")
+				return
+			}
+		}
+		
+		// Save configuration
+		piiAIConfig["ai_enabled"] = req.AIEnabled
+		piiAIConfig["provider"] = req.Provider
+		piiAIConfig["model"] = req.Model
+		piiAIConfig["api_key"] = req.APIKey
+		piiAIConfig["endpoint"] = req.Endpoint
+		piiAIConfig["max_tokens"] = req.MaxTokens
+		piiAIConfig["temperature"] = req.Temperature
+		piiAIConfig["detect_obfuscated"] = req.DetectObfuscated
+		piiAIConfig["contextual_analysis"] = req.ContextualAnalysis
+		piiAIConfig["multilingual"] = req.Multilingual
+		piiAIConfig["confidence_threshold"] = req.ConfidenceThreshold
+		piiAIConfig["system_prompt"] = req.SystemPrompt
+		
+		response := map[string]interface{}{
+			"message": "PII AI provider configuration saved successfully",
+			"config": map[string]interface{}{
+				"ai_enabled":             req.AIEnabled,
+				"provider":               req.Provider,
+				"model":                  req.Model,
+				"api_key_set":            req.APIKey != "",
+				"endpoint":               req.Endpoint,
+				"max_tokens":             req.MaxTokens,
+				"temperature":            req.Temperature,
+				"detect_obfuscated":      req.DetectObfuscated,
+				"contextual_analysis":    req.ContextualAnalysis,
+				"multilingual":           req.Multilingual,
+				"confidence_threshold":   req.ConfidenceThreshold,
+				"system_prompt":          req.SystemPrompt,
+			},
+		}
+		sendSuccessResponse(w, response)
+		
+	default:
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+	}
+}
+
+// HandlePiiAITest tests AI provider connectivity for PII detection
+func HandlePiiAITest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	
+	var req struct {
+		Content  string `json:"content"`
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+		APIKey   string `json:"api_key"`
+	}
+	
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendErrorResponse(w, http.StatusBadRequest, "Invalid JSON payload")
+		return
+	}
+	
+	if req.Content == "" {
+		sendErrorResponse(w, http.StatusBadRequest, "Content is required")
+		return
+	}
+	
+	// Check if AI is enabled and configured
+	aiEnabled, _ := piiAIConfig["ai_enabled"].(bool)
+	if !aiEnabled {
+		// Fall back to simulation if AI is not enabled
+		result := simulatePiiAIDetection(req.Content)
+		result["provider"] = "simulated"
+		result["model"] = "simulated"
+		result["response_time"] = "50ms"
+		result["method"] = "Simulated"
+		result["status"] = "simulated"
+		sendSuccessResponse(w, result)
+		return
+	}
+	
+	// Use real AI provider
+	startTime := time.Now()
+	result, err := callAIForPIIDetection(req.Content, req.Provider, req.Model, req.APIKey)
+	responseTime := time.Since(startTime)
+	
+	if err != nil {
+		// Fall back to simulation on error
+		log.Printf("AI provider error for PII detection: %v", err)
+		result := simulatePiiAIDetection(req.Content)
+		result["provider"] = req.Provider
+		result["model"] = req.Model
+		result["response_time"] = responseTime.String()
+		result["method"] = "Fallback (AI Error)"
+		result["status"] = "error_fallback"
+		result["error"] = err.Error()
+		sendSuccessResponse(w, result)
+		return
+	}
+	
+	result["provider"] = req.Provider
+	result["model"] = req.Model
+	result["response_time"] = responseTime.String()
+	result["method"] = "AI Enhanced"
+	result["status"] = "live"
+	
+	sendSuccessResponse(w, result)
+}
+
+// Helper function to simulate PII AI detection
+func simulatePiiAIDetection(content string) map[string]interface{} {
+	content = strings.ToLower(content)
+	detected := false
+	types := []string{}
+	score := 0.0
+	
+	// Check for obfuscated emails
+	if strings.Contains(content, "at") && strings.Contains(content, "dot") {
+		detected = true
+		types = append(types, "email")
+		score += 0.3
+	}
+	
+	// Check for written-out phone numbers
+	if strings.Contains(content, "five five five") || strings.Contains(content, "triple") {
+		detected = true
+		types = append(types, "phone")
+		score += 0.25
+	}
+	
+	// Check for names in context
+	if strings.Contains(content, "my name is") || strings.Contains(content, "i'm") {
+		detected = true
+		types = append(types, "name")
+		score += 0.2
+	}
+	
+	// Check for address indicators
+	if strings.Contains(content, "street") || strings.Contains(content, "avenue") || strings.Contains(content, "live at") {
+		detected = true
+		types = append(types, "address")
+		score += 0.3
+	}
+	
+	riskLevel := "low"
+	if score > 0.7 {
+		riskLevel = "high"
+	} else if score > 0.4 {
+		riskLevel = "medium"
+	}
+	
+	maskedContent := content
+	if detected {
+		maskedContent = strings.ReplaceAll(maskedContent, "john", "[NAME]")
+		maskedContent = strings.ReplaceAll(maskedContent, "smith", "[NAME]")
+		maskedContent = strings.ReplaceAll(maskedContent, "example.com", "[DOMAIN]")
+	}
+	
+	return map[string]interface{}{
+		"detected":        detected,
+		"score":           score,
+		"types":           types,
+		"method":          "AI Enhanced",
+		"risk_level":      riskLevel,
+		"masked_content":  maskedContent,
+		"confidence":      0.88,
+		"provider":        "simulated",
+		"response_time":   "267ms",
+		"tokens_used":     67,
+		"status":          "simulated", // Will be "live" when implemented
+	}
+}
+
+// callAIForPIIDetection calls the configured AI provider for PII detection
+func callAIForPIIDetection(content, providerName, model, apiKey string) (map[string]interface{}, error) {
+	// Create provider configuration
+	providerConfig := providers.ProviderConfig{
+		Name:    providerName,
+		Type:    getProviderType(providerName),
+		APIKey:  apiKey,
+		Models:  []string{model},
+		Enabled: true,
+	}
+	
+	// Set default base URLs
+	switch providerConfig.Type {
+	case providers.ProviderTypeOpenAI:
+		providerConfig.BaseURL = "https://api.openai.com/v1"
+	case providers.ProviderTypeAnthropic:
+		providerConfig.BaseURL = "https://api.anthropic.com"
+	case providers.ProviderTypeLocal:
+		providerConfig.BaseURL = "http://localhost:11434"
+	}
+	
+	// Create provider instance
+	factory := providers.NewProviderFactory()
+	provider, err := factory.CreateProviderWithConfig(providerConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create provider: %w", err)
+	}
+	
+	// Start provider
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	
+	if err := provider.Start(ctx); err != nil {
+		return nil, fmt.Errorf("failed to start provider: %w", err)
+	}
+	
+	// Prepare the AI request
+	systemPrompt := piiAIConfig["system_prompt"].(string)
+	maxTokens, _ := piiAIConfig["max_tokens"].(int)
+	temperature, _ := piiAIConfig["temperature"].(float64)
+	
+	userPrompt := fmt.Sprintf(`Analyze this content for personally identifiable information (PII) including obfuscated, contextual, and multi-language variations:
+
+Content: "%s"
+
+Please respond with a JSON object containing:
+{
+  "detected": true/false,
+  "score": 0.85,
+  "types": ["email", "phone", "name"],
+  "risk_level": "low|medium|high",
+  "masked_content": "content with PII replaced by [TYPE] placeholders",
+  "confidence": 0.92,
+  "tokens_used": 78
+}`, content)
+	
+	chatRequest := &providers.ChatRequest{
+		Model: model,
+		Messages: []providers.ChatMessage{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: userPrompt},
+		},
+		MaxTokens:   maxTokens,
+		Temperature: temperature,
+	}
+	
+	// Make the AI request
+	response, err := provider.SendRequest(ctx, chatRequest)
+	if err != nil {
+		return nil, fmt.Errorf("AI request failed: %w", err)
+	}
+	
+	// Parse the AI response
+	var result map[string]interface{}
+	if err := json.Unmarshal([]byte(response.Message.Content), &result); err != nil {
+		// If JSON parsing fails, create a fallback response
+		log.Printf("Failed to parse AI response as JSON: %v", err)
+		result = map[string]interface{}{
+			"detected":       false,
+			"score":          0.0,
+			"types":          []string{},
+			"risk_level":     "low",
+			"masked_content": content,
+			"confidence":     0.0,
+			"tokens_used":    response.Usage.TotalTokens,
+			"raw_response":   response.Message.Content,
+		}
+	}
+	
+	// Ensure tokens_used is set
+	if _, exists := result["tokens_used"]; !exists {
+		result["tokens_used"] = response.Usage.TotalTokens
+	}
+	
+	return result, nil
+}
+
+// HandlePiiStats returns statistics for PII detection
+func HandlePiiStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		sendErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	
+	// TODO: Implement actual PII statistics from database
+	// For now, return simulated stats
+	sendSuccessResponse(w, map[string]interface{}{
+		"content_scanned":     2341,
+		"pii_detected":        156,
+		"average_confidence":  0.82,
+		"ai_detections":       67,
+		"pattern_detections":  89,
+		"high_risk_count":     23,
+		"masked_instances":    134,
+		"last_updated":        time.Now().Format(time.RFC3339),
+	})
 }

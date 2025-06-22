@@ -1,0 +1,63 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+README.md
+*.md
+TESTS/
+framework/
+_Tasks/
+
+# Frontend development files
+frontend/node_modules
+frontend/.vite
+frontend/coverage
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# Backend development files
+backend/main
+backend/logs/
+backend/storage/*.db*
+backend/node_modules
+backend/package*.json
+
+# Any Node.js files that shouldn't be in backend
+**/node_modules
+**/package-lock.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode
+.idea
+*.swp
+*.swo
+
+# Build artifacts
+dist/
+build/
+*.exe
+
+# Mockware (if not needed in production)
+mockware/
+
+# Test files
+*_test.go
+**/*_test.go
+**/test/
+**/__tests__/
+
+# Node.js
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# PowerShell scripts (if not needed in container)
+*.ps1 

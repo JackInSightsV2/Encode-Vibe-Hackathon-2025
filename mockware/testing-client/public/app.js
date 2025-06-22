@@ -486,7 +486,7 @@ function updateLastUpdateTime() {
 // Check mock provider status
 async function checkMockProviderStatus() {
     try {
-        const response = await fetch('http://localhost:8081/health');
+        const response = await fetch('http://74.177.192.23:8081/health');
         const data = await response.json();
         
         if (response.ok && data.status === 'healthy') {

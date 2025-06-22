@@ -1,9 +1,13 @@
 package opik
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"sync"
 	"time"
@@ -37,6 +41,7 @@ type OpikClient struct {
 	evaluators []Evaluator
 	mu        sync.RWMutex
 	closed    bool
+	httpClient *http.Client
 	
 	// Batching
 	traceBatch    []Trace
@@ -51,6 +56,34 @@ type TraceOptions struct {
 	Input    map[string]interface{}
 	Metadata map[string]interface{}
 	Tags     []string
+}
+
+// OpikTracePayload represents the payload sent to Opik API for traces
+type OpikTracePayload struct {
+	ID         string                 `json:"id"`
+	Name       string                 `json:"name"`
+	StartTime  string                 `json:"start_time"`
+	EndTime    string                 `json:"end_time,omitempty"`
+	Input      map[string]interface{} `json:"input,omitempty"`
+	Output     map[string]interface{} `json:"output,omitempty"`
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`
+	Tags       []string               `json:"tags,omitempty"`
+	ProjectID  string                 `json:"project_id"`
+}
+
+// OpikSpanPayload represents the payload sent to Opik API for spans
+type OpikSpanPayload struct {
+	ID        string                 `json:"id"`
+	TraceID   string                 `json:"trace_id"`
+	ParentID  string                 `json:"parent_id,omitempty"`
+	Name      string                 `json:"name"`
+	Type      string                 `json:"type"`
+	StartTime string                 `json:"start_time"`
+	EndTime   string                 `json:"end_time,omitempty"`
+	Input     map[string]interface{} `json:"input,omitempty"`
+	Output    map[string]interface{} `json:"output,omitempty"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	Tags      []string               `json:"tags,omitempty"`
 }
 
 // NewOpikClient creates a new Opik client
@@ -87,6 +120,7 @@ func NewOpikClient(config OpikConfig) (*OpikClient, error) {
 		spanBatch:    make([]Span, 0, config.BatchSize),
 		shutdownChan: make(chan struct{}),
 		evaluators:   make([]Evaluator, 0),
+		httpClient:   &http.Client{Timeout: 30 * time.Second},
 	}
 
 	// Create tracer
@@ -112,8 +146,14 @@ func (oc *OpikClient) StartTrace(ctx context.Context, name string, options Trace
 	}
 	oc.mu.RUnlock()
 
+	// Generate UUID v7 for trace ID
+	traceUUID, err := uuid.NewV7()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate UUID: %v", err)
+	}
+
 	trace := &Trace{
-		ID:        uuid.New().String(),
+		ID:        traceUUID.String(),
 		Name:      name,
 		StartTime: time.Now(),
 		Input:     options.Input,
@@ -223,9 +263,33 @@ func (oc *OpikClient) flushTraces() {
 		return
 	}
 
-	// TODO: Implement actual HTTP request to Opik API
-	// For now, just log
-	log.Printf("Flushing %d traces to Opik", len(oc.traceBatch))
+	// Convert traces to Opik API format
+	payloads := make([]OpikTracePayload, len(oc.traceBatch))
+	for i, trace := range oc.traceBatch {
+		payloads[i] = OpikTracePayload{
+			ID:          trace.ID,
+			Name:        trace.Name,
+			StartTime:   trace.StartTime.Format(time.RFC3339),
+			EndTime:     trace.EndTime.Format(time.RFC3339),
+			Input:       trace.Input,
+			Output:      trace.Output,
+			Metadata:    trace.Metadata,
+			Tags:        trace.Tags,
+			ProjectID:   "01979287-3120-7763-a3d5-0cb8eda04a54", // QT-1 Middleware project ID
+		}
+	}
+
+	// Send traces to Opik API individually
+	for _, payload := range payloads {
+		if err := oc.sendSingleTraceToOpik(payload); err != nil {
+			log.Printf("Failed to send trace to Opik: %v", err)
+			continue // Continue with other traces even if one fails
+		} else {
+			log.Printf("Successfully sent trace %s to Opik", payload.ID)
+		}
+	}
+
+	log.Printf("Successfully flushed %d traces to Opik", len(oc.traceBatch))
 	
 	// Clear batch
 	oc.traceBatch = make([]Trace, 0, oc.config.BatchSize)
@@ -237,9 +301,65 @@ func (oc *OpikClient) flushSpans() {
 		return
 	}
 
-	// TODO: Implement actual HTTP request to Opik API
-	// For now, just log
-	log.Printf("Flushing %d spans to Opik", len(oc.spanBatch))
+	// Convert spans to Opik API format
+	payloads := make([]OpikSpanPayload, len(oc.spanBatch))
+	for i, span := range oc.spanBatch {
+		// Convert input to map[string]interface{} if possible
+		var input map[string]interface{}
+		if inputMap, ok := span.Input.(map[string]interface{}); ok {
+			input = inputMap
+		} else if span.Input != nil {
+			input = map[string]interface{}{"data": span.Input}
+		}
+
+		// Convert output to map[string]interface{} if possible
+		var output map[string]interface{}
+		if outputMap, ok := span.Output.(map[string]interface{}); ok {
+			output = outputMap
+		} else if span.Output != nil {
+			output = map[string]interface{}{"data": span.Output}
+		}
+
+		// Extract span type from metadata
+		spanType := "unknown"
+		if span.Metadata != nil {
+			if typeValue, ok := span.Metadata["span_type"].(string); ok {
+				spanType = typeValue
+			}
+		}
+
+		// Extract tags from metadata
+		var tags []string
+		if span.Metadata != nil {
+			if tagsMap, ok := span.Metadata["tags"].(map[string]interface{}); ok {
+				for key := range tagsMap {
+					tags = append(tags, key)
+				}
+			}
+		}
+
+		payloads[i] = OpikSpanPayload{
+			ID:        span.ID,
+			TraceID:   span.TraceID,
+			ParentID:  "", // No parent ID in current implementation
+			Name:      span.Name,
+			Type:      spanType,
+			StartTime: span.StartTime.Format(time.RFC3339),
+			EndTime:   span.EndTime.Format(time.RFC3339),
+			Input:     input,
+			Output:    output,
+			Metadata:  span.Metadata,
+			Tags:      tags,
+		}
+	}
+
+	// Send to Opik API
+	if err := oc.sendSpansToOpik(payloads); err != nil {
+		log.Printf("Failed to send spans to Opik: %v", err)
+		return
+	}
+
+	log.Printf("Successfully flushed %d spans to Opik", len(oc.spanBatch))
 	
 	// Clear batch
 	oc.spanBatch = make([]Span, 0, oc.config.BatchSize)
@@ -275,6 +395,78 @@ func (oc *OpikClient) Close() error {
 
 // Context key for trace storage
 type traceContextKey struct{}
+
+// sendSingleTraceToOpik sends a single trace to the Opik API
+func (oc *OpikClient) sendSingleTraceToOpik(trace OpikTracePayload) error {
+	if !oc.config.Enabled {
+		return nil
+	}
+
+	jsonData, err := json.Marshal(trace)
+	if err != nil {
+		return fmt.Errorf("failed to marshal trace: %w", err)
+	}
+
+	log.Printf("Sending trace to Opik: %s", string(jsonData))
+
+	req, err := http.NewRequest("POST", oc.config.BaseURL+"/v1/private/traces", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Comet-Workspace", "jisencodevibehackathon2025")
+	req.Header.Set("authorization", oc.config.APIKey)
+
+	resp, err := oc.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		log.Printf("Opik traces API error response: %s", string(body))
+		return fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// sendSpansToOpik sends spans to the Opik API
+func (oc *OpikClient) sendSpansToOpik(spans []OpikSpanPayload) error {
+	if !oc.config.Enabled {
+		return nil
+	}
+
+	jsonData, err := json.Marshal(spans)
+	if err != nil {
+		return fmt.Errorf("failed to marshal spans: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", oc.config.BaseURL+"/v1/private/spans", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Comet-Workspace", "jisencodevibehackathon2025")
+	req.Header.Set("authorization", oc.config.APIKey)
+
+	resp, err := oc.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("API request failed with status %d", resp.StatusCode)
+	}
+
+	return nil
+}
 
 // GetTraceFromContext retrieves the current trace from context
 func GetTraceFromContext(ctx context.Context) *Trace {

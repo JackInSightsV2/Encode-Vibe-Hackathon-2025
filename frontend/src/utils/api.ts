@@ -4,7 +4,8 @@ interface ApiRequestOptions extends RequestInit {
   requireAuth?: boolean;
 }
 
-const API_BASE_URL = 'http://localhost:8080';
+// Use relative URL for production deployment
+const API_BASE_URL = `${window.location.protocol}//${window.location.host}`;
 
 export const apiRequest = async (
   endpoint: string, 

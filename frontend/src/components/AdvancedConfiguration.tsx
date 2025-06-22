@@ -48,7 +48,7 @@ const AdvancedConfiguration: React.FC = () => {
   const [ruleEngineConfig, setRuleEngineConfig] = useState<RuleEngineConfig | null>(null)
   const [loading, setLoading] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
-  const [activeTab, setActiveTab] = useState<'moderation' | 'rules' | 'layers' | 'pii' | 'relevancy' | 'performance'>('moderation')
+  const [activeTab, setActiveTab] = useState<'moderation' | 'rules' | 'layers' | 'pii' | 'relevancy' | 'regex' | 'performance'>('moderation')
   
   // Relevancy-specific state
   const [relevancyStats, setRelevancyStats] = useState<any>(null)
@@ -58,11 +58,28 @@ const AdvancedConfiguration: React.FC = () => {
   const [newKeywordScore, setNewKeywordScore] = useState(0.5)
   const [newKeywordCategory, setNewKeywordCategory] = useState('relevant')
   
-  // AI Provider state
+  // AI Provider state (shared across layers)
   const [aiProviderConfig, setAiProviderConfig] = useState<any>(null)
   const [aiTestContent, setAiTestContent] = useState('')
   const [aiTestResult, setAiTestResult] = useState<any>(null)
   const [aiTestLoading, setAiTestLoading] = useState(false)
+
+  // Regex layer state
+  const [regexStats, setRegexStats] = useState<any>(null)
+  const [regexTestContent, setRegexTestContent] = useState('')
+  const [regexTestResult, setRegexTestResult] = useState<any>(null)
+  const [regexTestLoading, setRegexTestLoading] = useState(false)
+  const [newRegexPattern, setNewRegexPattern] = useState('')
+  const [newRegexDescription, setNewRegexDescription] = useState('')
+  const [newRegexSeverity, setNewRegexSeverity] = useState('medium')
+  const [regexAiConfig, setRegexAiConfig] = useState<any>(null)
+
+  // PII layer state
+  const [piiStats, setPiiStats] = useState<any>(null)
+  const [piiTestContent, setPiiTestContent] = useState('')
+  const [piiTestResult, setPiiTestResult] = useState<any>(null)
+  const [piiTestLoading, setPiiTestLoading] = useState(false)
+  const [piiAiConfig, setPiiAiConfig] = useState<any>(null)
 
   useEffect(() => {
     fetchConfigurations()
@@ -71,8 +88,12 @@ const AdvancedConfiguration: React.FC = () => {
   useEffect(() => {
     if (activeTab === 'relevancy' && !aiProviderConfig) {
       fetchAIProviderConfig()
+    } else if (activeTab === 'regex' && !regexAiConfig) {
+      fetchRegexAIConfig()
+    } else if (activeTab === 'pii' && !piiAiConfig) {
+      fetchPiiAIConfig()
     }
-  }, [activeTab, aiProviderConfig])
+  }, [activeTab, aiProviderConfig, regexAiConfig, piiAiConfig])
 
   const fetchConfigurations = async () => {
     setLoading(true)
@@ -258,38 +279,34 @@ const AdvancedConfiguration: React.FC = () => {
   }
 
   const addKeyword = async (relevancyLayerIndex: number) => {
-    if (!newKeyword.trim()) return
+    if (!newKeyword.trim() || !moderationConfig) return
     
     try {
+      const relevancyLayer = moderationConfig.layers[relevancyLayerIndex]
+      const category = newKeywordCategory === 'relevant' ? 'relevant_keywords' : 'irrelevant_keywords'
+      const currentKeywords = relevancyLayer.options[category] || []
+      
       const response = await fetch('/api/relevancy/keywords', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           keyword: newKeyword,
-          score: newKeywordScore,
-          category: newKeywordCategory
+          category: newKeywordCategory,
+          score: newKeywordScore
         })
       })
       
       if (response.ok) {
         // Update local state
-        const currentOptions = moderationConfig?.layers[relevancyLayerIndex]?.options || {}
-        const categoryKey = newKeywordCategory === 'relevant' ? 'relevant_keywords' : 
-                          newKeywordCategory === 'irrelevant' ? 'irrelevant_keywords' : 'custom_keywords'
-        
-        if (categoryKey === 'custom_keywords') {
-          const customKeywords = currentOptions.custom_keywords || {}
-          customKeywords[newKeyword] = newKeywordScore
-          updateLayerConfig(relevancyLayerIndex, 'options.custom_keywords', customKeywords)
+        if (newKeywordCategory === 'custom') {
+          updateLayerConfig(relevancyLayerIndex, `options.custom_keywords.${newKeyword}`, newKeywordScore)
         } else {
-          const keywords = currentOptions[categoryKey] || []
-          keywords.push(newKeyword)
-          updateLayerConfig(relevancyLayerIndex, `options.${categoryKey}`, keywords)
+          updateLayerConfig(relevancyLayerIndex, `options.${category}`, [...currentKeywords, newKeyword])
         }
         
         setNewKeyword('')
         setNewKeywordScore(0.5)
-        setNewKeywordCategory('relevant')
+        fetchRelevancyStats()
       }
     } catch (error) {
       console.error('Failed to add keyword:', error)
@@ -297,34 +314,39 @@ const AdvancedConfiguration: React.FC = () => {
   }
 
   const removeKeyword = async (relevancyLayerIndex: number, keyword: string, category: string) => {
+    if (!moderationConfig) return
+    
     try {
       const response = await fetch(`/api/relevancy/keywords/${encodeURIComponent(keyword)}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category })
       })
       
       if (response.ok) {
-        // Update local state
-        const currentOptions = moderationConfig?.layers[relevancyLayerIndex]?.options || {}
+        const relevancyLayer = moderationConfig.layers[relevancyLayerIndex]
         
         if (category === 'custom') {
-          const customKeywords = { ...currentOptions.custom_keywords }
-          delete customKeywords[keyword]
-          updateLayerConfig(relevancyLayerIndex, 'options.custom_keywords', customKeywords)
+          const newCustomKeywords = { ...relevancyLayer.options.custom_keywords }
+          delete newCustomKeywords[keyword]
+          updateLayerConfig(relevancyLayerIndex, 'options.custom_keywords', newCustomKeywords)
         } else {
-          const categoryKey = category === 'relevant' ? 'relevant_keywords' : 'irrelevant_keywords'
-          const keywords = (currentOptions[categoryKey] || []).filter((k: string) => k !== keyword)
-          updateLayerConfig(relevancyLayerIndex, `options.${categoryKey}`, keywords)
+          const currentKeywords = relevancyLayer.options[category] || []
+          const newKeywords = currentKeywords.filter((k: string) => k !== keyword)
+          updateLayerConfig(relevancyLayerIndex, `options.${category}`, newKeywords)
         }
+        
+        fetchRelevancyStats()
       }
     } catch (error) {
       console.error('Failed to remove keyword:', error)
     }
   }
 
-  // AI Provider functions
+  // AI Provider functions (shared)
   const fetchAIProviderConfig = async () => {
     try {
-      const response = await fetch('/api/relevancy/ai-provider')
+      const response = await fetch('/api/relevancy-ai-provider')
       if (response.ok) {
         const data = await response.json()
         setAiProviderConfig(data.data)
@@ -336,7 +358,7 @@ const AdvancedConfiguration: React.FC = () => {
 
   const saveAIProviderConfig = async (config: any) => {
     try {
-      const response = await fetch('/api/relevancy/ai-provider', {
+      const response = await fetch('/api/relevancy-ai-provider', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config)
@@ -344,13 +366,10 @@ const AdvancedConfiguration: React.FC = () => {
       
       if (response.ok) {
         const data = await response.json()
-        setAiProviderConfig(data.data)
-        return true
+        setAiProviderConfig(data.data?.config || data.data)
       }
-      return false
     } catch (error) {
       console.error('Failed to save AI provider config:', error)
-      return false
     }
   }
 
@@ -359,7 +378,7 @@ const AdvancedConfiguration: React.FC = () => {
     
     setAiTestLoading(true)
     try {
-      const response = await fetch('/api/relevancy/ai-test', {
+      const response = await fetch('/api/relevancy-ai-test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -388,13 +407,200 @@ const AdvancedConfiguration: React.FC = () => {
     }))
   }
 
-  if (loading) {
+  // Regex layer functions
+  const fetchRegexAIConfig = async () => {
+    try {
+      const response = await fetch('/api/regex-ai-provider')
+      if (response.ok) {
+        const data = await response.json()
+        setRegexAiConfig(data.data)
+      }
+    } catch (error) {
+      console.error('Failed to fetch Regex AI provider config:', error)
+    }
+  }
+
+  const saveRegexAIConfig = async (config: any) => {
+    try {
+      const response = await fetch('/api/regex-ai-provider', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        setRegexAiConfig(data.data?.config || data.data)
+      }
+    } catch (error) {
+      console.error('Failed to save Regex AI provider config:', error)
+    }
+  }
+
+  const updateRegexAIConfig = (key: string, value: any) => {
+    setRegexAiConfig((prev: any) => ({
+      ...prev,
+      [key]: value
+    }))
+  }
+
+  const fetchRegexStats = async () => {
+    try {
+      const response = await fetch('/api/regex-stats')
+      if (response.ok) {
+        const data = await response.json()
+        setRegexStats(data.data)
+      }
+    } catch (error) {
+      console.error('Failed to fetch regex stats:', error)
+    }
+  }
+
+  const testRegex = async () => {
+    if (!regexTestContent.trim()) return
+    
+    setRegexTestLoading(true)
+    try {
+      const response = await fetch('/api/regex-ai-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: regexTestContent,
+          provider: regexAiConfig?.provider || '',
+          model: regexAiConfig?.model || '',
+          api_key: regexAiConfig?.api_key || ''
+        })
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        setRegexTestResult(data.data)
+      }
+    } catch (error) {
+      console.error('Failed to test regex:', error)
+    } finally {
+      setRegexTestLoading(false)
+    }
+  }
+
+  const addRegexPattern = async (regexLayerIndex: number) => {
+    if (!newRegexPattern.trim() || !moderationConfig) return
+    
+    try {
+      const response = await fetch('/api/regex/patterns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pattern: newRegexPattern,
+          description: newRegexDescription,
+          severity: newRegexSeverity
+        })
+      })
+      
+      if (response.ok) {
+        const regexLayer = moderationConfig.layers[regexLayerIndex]
+        const currentPatterns = regexLayer.options.patterns || []
+        updateLayerConfig(regexLayerIndex, 'options.patterns', [
+          ...currentPatterns,
+          {
+            pattern: newRegexPattern,
+            description: newRegexDescription,
+            severity: newRegexSeverity,
+            enabled: true
+          }
+        ])
+        
+        setNewRegexPattern('')
+        setNewRegexDescription('')
+        setNewRegexSeverity('medium')
+        fetchRegexStats()
+      }
+    } catch (error) {
+      console.error('Failed to add regex pattern:', error)
+    }
+  }
+
+  // PII layer functions
+  const fetchPiiAIConfig = async () => {
+    try {
+      const response = await fetch('/api/pii-ai-provider')
+      if (response.ok) {
+        const data = await response.json()
+        setPiiAiConfig(data.data)
+      }
+    } catch (error) {
+      console.error('Failed to fetch PII AI provider config:', error)
+    }
+  }
+
+  const savePiiAIConfig = async (config: any) => {
+    try {
+      const response = await fetch('/api/pii-ai-provider', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        setPiiAiConfig(data.data?.config || data.data)
+      }
+    } catch (error) {
+      console.error('Failed to save PII AI provider config:', error)
+    }
+  }
+
+  const updatePiiAIConfig = (key: string, value: any) => {
+    setPiiAiConfig((prev: any) => ({
+      ...prev,
+      [key]: value
+    }))
+  }
+
+  const fetchPiiStats = async () => {
+    try {
+      const response = await fetch('/api/pii-stats')
+      if (response.ok) {
+        const data = await response.json()
+        setPiiStats(data.data)
+      }
+    } catch (error) {
+      console.error('Failed to fetch PII stats:', error)
+    }
+  }
+
+  const testPii = async () => {
+    if (!piiTestContent.trim()) return
+    
+    setPiiTestLoading(true)
+    try {
+      const response = await fetch('/api/pii-ai-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: piiTestContent,
+          provider: piiAiConfig?.provider || '',
+          model: piiAiConfig?.model || '',
+          api_key: piiAiConfig?.api_key || ''
+        })
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        setPiiTestResult(data.data)
+      }
+    } catch (error) {
+      console.error('Failed to test PII:', error)
+    } finally {
+      setPiiTestLoading(false)
+    }
+  }
+
+  if (loading && !moderationConfig && !ruleEngineConfig) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <div className="text-slate-600">Loading configuration...</div>
-        </div>
+      <div className="flex items-center justify-center p-12">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <span className="ml-4 text-slate-600">Loading configuration...</span>
       </div>
     )
   }
@@ -438,8 +644,9 @@ const AdvancedConfiguration: React.FC = () => {
             { key: 'moderation', label: 'Moderation Engine', icon: '🛡️' },
             { key: 'rules', label: 'Rule Engine', icon: '⚙️' },
             { key: 'layers', label: 'Layer Configuration', icon: '🏗️' },
-            { key: 'pii', label: 'PII Detection', icon: '🔒' },
             { key: 'relevancy', label: 'Relevancy Layer', icon: '🎯' },
+            { key: 'regex', label: 'Regex Layer', icon: '🔍' },
+            { key: 'pii', label: 'PII Detection', icon: '🔒' },
             { key: 'performance', label: 'Performance & Cache', icon: '⚡' }
           ].map((tab) => (
             <button
@@ -1867,6 +2074,926 @@ const AdvancedConfiguration: React.FC = () => {
                       )}
                     </div>
                   )}
+                </div>
+              )
+            })()}
+          </div>
+        </div>
+      )}
+
+             {/* Regex Tab */}
+       {activeTab === 'regex' && moderationConfig && (
+         <div className="space-y-6">
+           <div className="bg-white border border-slate-200 rounded-xl p-6">
+             <h2 className="text-xl font-bold text-slate-900 mb-6">🔍 Regex Layer Configuration</h2>
+             
+             {/* Find Regex Layer */}
+             {(() => {
+               const regexLayer = moderationConfig.layers.find(layer => layer.name === 'regex')
+               if (!regexLayer) {
+                return (
+                  <div className="text-center py-12 text-slate-500">
+                    <span className="text-4xl mb-4 block">🔍</span>
+                    <h3 className="text-lg font-medium mb-2">Regex Layer Not Found</h3>
+                    <p className="text-sm">
+                      The regex layer is not configured. Please add it to your moderation layers.
+                    </p>
+                  </div>
+                )
+              }
+
+              const regexLayerIndex = moderationConfig.layers.findIndex(layer => layer.name === 'regex')
+              
+              return (
+                <div className="space-y-8">
+                  {/* Regex Layer Status */}
+                  <div className="bg-gradient-to-r from-green-50 to-teal-50 border border-green-200 rounded-lg p-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-semibold text-slate-900">Regex Layer Status</h3>
+                      <div className="flex items-center space-x-4">
+                        <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                          regexLayer.enabled ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                        }`}>
+                          {regexLayer.enabled ? 'Enabled' : 'Disabled'}
+                        </span>
+                        <button
+                          onClick={() => updateLayerConfig(regexLayerIndex, 'enabled', !regexLayer.enabled)}
+                          className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                            regexLayer.enabled 
+                              ? 'bg-red-600 text-white hover:bg-red-700' 
+                              : 'bg-green-600 text-white hover:bg-green-700'
+                          }`}
+                        >
+                          {regexLayer.enabled ? 'Disable' : 'Enable'}
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">
+                          Weight
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.1"
+                          value={regexLayer.weight}
+                          onChange={(e) => updateLayerConfig(regexLayerIndex, 'weight', parseFloat(e.target.value))}
+                          className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">
+                          Threshold
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.1"
+                          value={regexLayer.threshold}
+                          onChange={(e) => updateLayerConfig(regexLayerIndex, 'threshold', parseFloat(e.target.value))}
+                          className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <div className="text-sm text-slate-600">
+                          <div>Score threshold for blocking content</div>
+                          <div className="text-xs text-slate-500 mt-1">
+                            Current: {(regexLayer.threshold * 100).toFixed(0)}%
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Regex Settings */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div>
+                      <h3 className="text-lg font-semibold text-slate-900 mb-4">Regex Patterns</h3>
+                      <div className="space-y-4">
+                                                 {regexLayer.options.patterns?.map((pattern: any, index: number) => (
+                          <div key={index} className="border border-slate-200 rounded-lg p-4">
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center space-x-2">
+                                <span>{pattern.pattern}</span>
+                                <span className="font-medium text-slate-900">{pattern.description}</span>
+                              </div>
+                              <input
+                                type="checkbox"
+                                checked={pattern.enabled}
+                                                                 onChange={(e) => updateLayerConfig(regexLayerIndex, 'options.patterns', regexLayer.options.patterns.map((p: any, i: number) => i === index ? { ...p, enabled: e.target.checked } : p))}
+                                className="rounded"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-slate-600 mb-1">
+                                Severity
+                              </label>
+                              <select
+                                value={pattern.severity}
+                                                                 onChange={(e) => updateLayerConfig(regexLayerIndex, 'options.patterns', regexLayer.options.patterns.map((p: any, i: number) => i === index ? { ...p, severity: e.target.value } : p))}
+                                className="w-full border border-slate-300 rounded px-2 py-1 text-sm"
+                              >
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
+                                <option value="critical">Critical</option>
+                              </select>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                                         <div>
+                       <h3 className="text-lg font-semibold text-slate-900 mb-4">🤖 AI Enhancement for Banned Words</h3>
+                       <div className="space-y-4">
+                         {/* AI Enhancement Toggle */}
+                         <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4">
+                           <div className="flex items-center justify-between mb-3">
+                             <div>
+                               <div className="font-medium text-slate-900">AI Word Variation Detection</div>
+                               <div className="text-sm text-slate-600">
+                                 Use AI to detect variations, misspellings, and synonyms of banned words that regex patterns might miss
+                               </div>
+                             </div>
+                             <input
+                               type="checkbox"
+                               checked={regexAiConfig?.ai_enabled ?? false}
+                               onChange={(e) => updateRegexAIConfig('ai_enabled', e.target.checked)}
+                               className="rounded"
+                             />
+                           </div>
+                           
+                           {regexAiConfig?.ai_enabled && (
+                             <div className="mt-4 bg-white rounded-lg p-3 border border-blue-100">
+                               <div className="text-xs text-slate-600 mb-2">
+                                 <strong>How it works:</strong> Regex patterns catch exact matches, AI catches variations
+                               </div>
+                               <div className="flex text-xs text-slate-500">
+                                 <div className="flex-1">
+                                   <div className="font-medium text-red-600 mb-1">Regex finds:</div>
+                                   <div>"violence" → ✓</div>
+                                   <div>"violent" → ✗</div>
+                                   <div>"violance" → ✗</div>
+                                 </div>
+                                 <div className="flex-1">
+                                   <div className="font-medium text-green-600 mb-1">AI also finds:</div>
+                                   <div>"violent" → ✓</div>
+                                   <div>"violance" → ✓</div>
+                                   <div>"brutality" → ✓</div>
+                                 </div>
+                               </div>
+                             </div>
+                           )}
+                         </div>
+
+                         {regexAiConfig?.ai_enabled && (
+                           <>
+                             {/* AI Provider Configuration */}
+                             <div className="border border-slate-200 rounded-lg p-4">
+                               <div className="font-medium text-slate-900 mb-3">AI Provider Settings</div>
+                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                 <div>
+                                   <label className="block text-sm font-medium text-slate-700 mb-1">
+                                     Provider
+                                   </label>
+                                   <select
+                                     value={regexAiConfig?.provider || ''}
+                                     onChange={(e) => updateRegexAIConfig('provider', e.target.value)}
+                                     className="w-full border border-slate-300 rounded px-2 py-1 text-sm"
+                                   >
+                                     <option value="">Select Provider</option>
+                                     <option value="openai">OpenAI</option>
+                                     <option value="anthropic">Anthropic</option>
+                                     <option value="local">Local Model</option>
+                                     <option value="custom">Custom Endpoint</option>
+                                   </select>
+                                 </div>
+                                 <div>
+                                   <label className="block text-sm font-medium text-slate-700 mb-1">
+                                     Model
+                                   </label>
+                                   <select
+                                     value={regexAiConfig?.model || ''}
+                                     onChange={(e) => updateRegexAIConfig('model', e.target.value)}
+                                     className="w-full border border-slate-300 rounded px-2 py-1 text-sm"
+                                   >
+                                     <option value="">Select Model</option>
+                                     {regexAiConfig?.provider === 'openai' && (
+                                       <>
+                                         <option value="gpt-4">GPT-4</option>
+                                         <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                                       </>
+                                     )}
+                                     {regexAiConfig?.provider === 'anthropic' && (
+                                       <>
+                                         <option value="claude-3-sonnet">Claude 3 Sonnet</option>
+                                         <option value="claude-3-haiku">Claude 3 Haiku</option>
+                                       </>
+                                     )}
+                                     {regexAiConfig?.provider === 'local' && (
+                                       <>
+                                         <option value="llama-2">Llama 2</option>
+                                         <option value="mistral">Mistral</option>
+                                       </>
+                                     )}
+                                   </select>
+                                 </div>
+                               </div>
+                               
+                               <div className="mt-3">
+                                 <label className="block text-sm font-medium text-slate-700 mb-1">
+                                   API Key
+                                 </label>
+                                 <input
+                                   type="password"
+                                   value={regexAiConfig?.api_key || ''}
+                                   onChange={(e) => updateRegexAIConfig('api_key', e.target.value)}
+                                   placeholder="Enter API key..."
+                                   className="w-full border border-slate-300 rounded px-2 py-1 text-sm"
+                                 />
+                               </div>
+                             </div>
+
+                             {/* AI Detection Settings */}
+                             <div className="border border-slate-200 rounded-lg p-4">
+                               <div className="font-medium text-slate-900 mb-3">AI Detection Behavior</div>
+                               <div className="space-y-3">
+                                 <div className="flex items-center justify-between">
+                                   <div>
+                                     <div className="text-sm font-medium text-slate-700">Detect Misspellings</div>
+                                     <div className="text-xs text-slate-500">Find common typos and intentional misspellings</div>
+                                   </div>
+                                   <input
+                                     type="checkbox"
+                                     checked={regexAiConfig?.detect_misspellings ?? true}
+                                     onChange={(e) => updateRegexAIConfig('detect_misspellings', e.target.checked)}
+                                     className="rounded"
+                                   />
+                                 </div>
+                                 
+                                 <div className="flex items-center justify-between">
+                                   <div>
+                                     <div className="text-sm font-medium text-slate-700">Detect Synonyms</div>
+                                     <div className="text-xs text-slate-500">Find words with similar meanings</div>
+                                   </div>
+                                   <input
+                                     type="checkbox"
+                                     checked={regexAiConfig?.detect_synonyms ?? true}
+                                     onChange={(e) => updateRegexAIConfig('detect_synonyms', e.target.checked)}
+                                     className="rounded"
+                                   />
+                                 </div>
+                                 
+                                 <div className="flex items-center justify-between">
+                                   <div>
+                                     <div className="text-sm font-medium text-slate-700">Detect Word Variations</div>
+                                     <div className="text-xs text-slate-500">Find different forms (violence → violent)</div>
+                                   </div>
+                                   <input
+                                     type="checkbox"
+                                     checked={regexAiConfig?.detect_variations ?? true}
+                                     onChange={(e) => updateRegexAIConfig('detect_variations', e.target.checked)}
+                                     className="rounded"
+                                   />
+                                 </div>
+                                 
+                                 <div className="flex items-center justify-between">
+                                   <div>
+                                     <div className="text-sm font-medium text-slate-700">Context-Aware Detection</div>
+                                     <div className="text-xs text-slate-500">Consider surrounding words for better accuracy</div>
+                                   </div>
+                                   <input
+                                     type="checkbox"
+                                     checked={regexAiConfig?.context_aware ?? true}
+                                     onChange={(e) => updateRegexAIConfig('context_aware', e.target.checked)}
+                                     className="rounded"
+                                   />
+                                 </div>
+                               </div>
+                             </div>
+
+                             {/* AI Model Parameters */}
+                             <div className="border border-slate-200 rounded-lg p-4">
+                               <div className="font-medium text-slate-900 mb-3">Model Parameters</div>
+                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                 <div>
+                                   <label className="block text-sm font-medium text-slate-700 mb-1">
+                                     Confidence Threshold
+                                   </label>
+                                   <input
+                                     type="number"
+                                     min="0"
+                                     max="1"
+                                     step="0.05"
+                                     value={regexAiConfig?.confidence_threshold || 0.8}
+                                     onChange={(e) => updateRegexAIConfig('confidence_threshold', parseFloat(e.target.value))}
+                                     className="w-full border border-slate-300 rounded px-2 py-1 text-sm"
+                                   />
+                                   <div className="text-xs text-slate-500 mt-1">
+                                     Higher = more strict, Lower = more permissive
+                                   </div>
+                                 </div>
+                                 
+                                 <div>
+                                   <label className="block text-sm font-medium text-slate-700 mb-1">
+                                     Temperature
+                                   </label>
+                                   <input
+                                     type="number"
+                                     min="0"
+                                     max="1"
+                                     step="0.1"
+                                     value={regexAiConfig?.temperature || 0.3}
+                                     onChange={(e) => updateRegexAIConfig('temperature', parseFloat(e.target.value))}
+                                     className="w-full border border-slate-300 rounded px-2 py-1 text-sm"
+                                   />
+                                   <div className="text-xs text-slate-500 mt-1">
+                                     Lower = more focused detection
+                                   </div>
+                                 </div>
+                               </div>
+                             </div>
+
+                             {/* Save AI Config Button */}
+                             <div className="flex justify-end">
+                               <button
+                                 onClick={() => saveRegexAIConfig(regexAiConfig)}
+                                 className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                               >
+                                 Save AI Configuration
+                               </button>
+                             </div>
+                           </>
+                         )}
+                       </div>
+                     </div>
+                  </div>
+
+                  {/* Regex Testing */}
+                  <div className="bg-white border border-slate-200 rounded-lg p-6">
+                    <h3 className="text-lg font-semibold text-slate-900 mb-4">🔍 Test Regex Patterns</h3>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">
+                          Test Content
+                        </label>
+                        <textarea
+                          value={regexTestContent}
+                          onChange={(e) => setRegexTestContent(e.target.value)}
+                          placeholder="Enter content to test regex patterns..."
+                          className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                          rows={3}
+                        />
+                      </div>
+                      
+                      <div className="flex items-center space-x-3">
+                        <button
+                          onClick={testRegex}
+                          disabled={!regexTestContent.trim() || regexTestLoading}
+                          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {regexTestLoading ? 'Testing...' : 'Test Regex Patterns'}
+                        </button>
+                        
+                        {regexTestResult && (
+                          <div className="flex items-center space-x-4">
+                            <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+                              regexTestResult.matched ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                            }`}>
+                              {regexTestResult.matched ? 'Matched' : 'No Match'}
+                            </div>
+                            <div className="text-sm text-slate-600">
+                              Matches: <span className="font-medium">{regexTestResult.matches.length}</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {regexTestResult && (
+                        <div className="bg-slate-50 rounded-lg p-4 text-sm">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
+                            <div>
+                              <div className="font-medium text-slate-700">Regex Score</div>
+                              <div className="text-green-600">{(regexTestResult.score * 100).toFixed(1)}%</div>
+                            </div>
+                            <div>
+                              <div className="font-medium text-slate-700">Pattern Matches</div>
+                              <div className="text-green-600">{regexTestResult.matches.length}</div>
+                            </div>
+                            <div>
+                              <div className="font-medium text-slate-700">Cache Hit Rate</div>
+                              <div className="text-blue-600">
+                                {regexTestResult.cache_hit_rate ? (regexTestResult.cache_hit_rate * 100).toFixed(1) + '%' : 'N/A'}
+                              </div>
+                            </div>
+                          </div>
+                          {regexTestResult.matched && (
+                            <div className="mt-3">
+                              <div className="font-medium text-slate-700 mb-1">Matched Patterns:</div>
+                              <div className="flex flex-wrap gap-2">
+                                                                 {regexTestResult.matches.map((match: any, i: number) => (
+                                  <span key={i} className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">
+                                    {match}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Add New Pattern */}
+                  <div className="bg-white border border-slate-200 rounded-lg p-6">
+                    <h3 className="text-lg font-semibold text-slate-900 mb-4">➕ Add New Pattern</h3>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">
+                          Pattern
+                        </label>
+                        <input
+                          type="text"
+                          value={newRegexPattern}
+                          onChange={(e) => setNewRegexPattern(e.target.value)}
+                          placeholder="Enter regex pattern..."
+                          className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">
+                          Description
+                        </label>
+                        <input
+                          type="text"
+                          value={newRegexDescription}
+                          onChange={(e) => setNewRegexDescription(e.target.value)}
+                          placeholder="Enter description for the pattern..."
+                          className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">
+                          Severity
+                        </label>
+                        <select
+                          value={newRegexSeverity}
+                          onChange={(e) => setNewRegexSeverity(e.target.value)}
+                          className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                        >
+                          <option value="low">Low</option>
+                          <option value="medium">Medium</option>
+                          <option value="high">High</option>
+                          <option value="critical">Critical</option>
+                        </select>
+                      </div>
+
+                      <button
+                        onClick={() => addRegexPattern(regexLayerIndex)}
+                        disabled={!newRegexPattern.trim()}
+                        className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Add Pattern
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Regex Statistics */}
+                  <div className="mt-6 bg-slate-50 border border-slate-200 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-medium text-slate-900">📊 Statistics</h4>
+                      <button
+                        onClick={fetchRegexStats}
+                        className="text-sm text-blue-600 hover:text-blue-800"
+                      >
+                        Refresh
+                      </button>
+                    </div>
+                    {regexStats ? (
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <div className="text-slate-600">Patterns Processed</div>
+                          <div className="font-medium text-slate-900">{regexStats.patterns_processed || 0}</div>
+                        </div>
+                        <div>
+                          <div className="text-slate-600">Patterns Blocked</div>
+                          <div className="font-medium text-red-600">{regexStats.patterns_blocked || 0}</div>
+                        </div>
+                        <div>
+                          <div className="text-slate-600">Avg Score</div>
+                          <div className="font-medium text-green-600">
+                            {regexStats.average_score ? (regexStats.average_score * 100).toFixed(1) + '%' : 'N/A'}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-slate-600">Cache Hit Rate</div>
+                          <div className="font-medium text-blue-600">
+                            {regexStats.cache_hit_rate ? (regexStats.cache_hit_rate * 100).toFixed(1) + '%' : 'N/A'}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-sm text-slate-500">Click refresh to load statistics</div>
+                    )}
+                  </div>
+                </div>
+              )
+            })()}
+          </div>
+        </div>
+      )}
+
+             {/* PII Tab */}
+       {activeTab === 'pii' && moderationConfig && (
+         <div className="space-y-6">
+           <div className="bg-white border border-slate-200 rounded-xl p-6">
+             <h2 className="text-xl font-bold text-slate-900 mb-6">🔒 PII Detection Configuration</h2>
+             
+             {/* Find PII Layer */}
+             {(() => {
+               const piiLayer = moderationConfig.layers.find(layer => layer.name === 'pii')
+               if (!piiLayer) {
+                return (
+                  <div className="text-center py-12 text-slate-500">
+                    <span className="text-4xl mb-4 block">🔍</span>
+                    <h3 className="text-lg font-medium mb-2">PII Layer Not Found</h3>
+                    <p className="text-sm">
+                      The PII detection layer is not configured. Please add it to your moderation layers.
+                    </p>
+                  </div>
+                )
+              }
+
+              const piiLayerIndex = moderationConfig.layers.findIndex(layer => layer.name === 'pii')
+              
+              return (
+                <div className="space-y-8">
+                  {/* PII Layer Status */}
+                  <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-semibold text-slate-900">🔒 PII Layer Status</h3>
+                      <div className="flex items-center space-x-4">
+                        <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                          piiLayer.enabled ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                        }`}>
+                          {piiLayer.enabled ? 'Enabled' : 'Disabled'}
+                        </span>
+                        <button
+                          onClick={() => updateLayerConfig(piiLayerIndex, 'enabled', !piiLayer.enabled)}
+                          className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                            piiLayer.enabled 
+                              ? 'bg-red-600 text-white hover:bg-red-700' 
+                              : 'bg-green-600 text-white hover:bg-green-700'
+                          }`}
+                        >
+                          {piiLayer.enabled ? 'Disable' : 'Enable'}
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">
+                          Weight
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.1"
+                          value={piiLayer.weight}
+                          onChange={(e) => updateLayerConfig(piiLayerIndex, 'weight', parseFloat(e.target.value))}
+                          className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">
+                          Threshold
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.1"
+                          value={piiLayer.threshold}
+                          onChange={(e) => updateLayerConfig(piiLayerIndex, 'threshold', parseFloat(e.target.value))}
+                          className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <div className="text-sm text-slate-600">
+                          <div>Score threshold for blocking content</div>
+                          <div className="text-xs text-slate-500 mt-1">
+                            Current: {(piiLayer.threshold * 100).toFixed(0)}%
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* AI Enhanced PII Detection */}
+                  <div className="bg-white border border-slate-200 rounded-lg p-6 mb-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-semibold text-slate-900">🤖 AI Enhanced Detection</h3>
+                      <div className="flex items-center space-x-2">
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          piiAiConfig?.ai_enabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                        }`}>
+                          {piiAiConfig?.ai_enabled ? 'AI Enabled' : 'AI Disabled'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      {/* AI Provider Configuration */}
+                      <div className="space-y-4">
+                        <div className="flex items-center space-x-2 mb-3">
+                          <input
+                            type="checkbox"
+                            checked={piiAiConfig?.ai_enabled || false}
+                            onChange={(e) => updatePiiAIConfig('ai_enabled', e.target.checked)}
+                            className="rounded"
+                          />
+                          <span className="text-sm font-medium text-slate-700">Enable AI Enhancement</span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-medium text-slate-600 mb-1">Provider</label>
+                            <select
+                              value={piiAiConfig?.provider || ''}
+                              onChange={(e) => updatePiiAIConfig('provider', e.target.value)}
+                              disabled={!piiAiConfig?.ai_enabled}
+                              className="w-full border border-slate-300 rounded px-2 py-1 text-xs disabled:bg-gray-50"
+                            >
+                              <option value="">Select Provider</option>
+                              <option value="openai">OpenAI</option>
+                              <option value="anthropic">Anthropic</option>
+                              <option value="local">Local LLM</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-slate-600 mb-1">Model</label>
+                            <input
+                              type="text"
+                              value={piiAiConfig?.model || ''}
+                              onChange={(e) => updatePiiAIConfig('model', e.target.value)}
+                              disabled={!piiAiConfig?.ai_enabled}
+                              placeholder="gpt-3.5-turbo"
+                              className="w-full border border-slate-300 rounded px-2 py-1 text-xs disabled:bg-gray-50"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">API Key</label>
+                          <input
+                            type="password"
+                            value={piiAiConfig?.api_key || ''}
+                            onChange={(e) => updatePiiAIConfig('api_key', e.target.value)}
+                            disabled={!piiAiConfig?.ai_enabled}
+                            placeholder="Enter API key..."
+                            className="w-full border border-slate-300 rounded px-2 py-1 text-xs disabled:bg-gray-50"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-medium text-slate-600 mb-1">Max Tokens</label>
+                            <input
+                              type="number"
+                              value={piiAiConfig?.max_tokens || 1024}
+                              onChange={(e) => updatePiiAIConfig('max_tokens', parseInt(e.target.value))}
+                              disabled={!piiAiConfig?.ai_enabled}
+                              className="w-full border border-slate-300 rounded px-2 py-1 text-xs disabled:bg-gray-50"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-slate-600 mb-1">Temperature</label>
+                            <input
+                              type="number"
+                              min="0"
+                              max="1"
+                              step="0.1"
+                              value={piiAiConfig?.temperature || 0.2}
+                              onChange={(e) => updatePiiAIConfig('temperature', parseFloat(e.target.value))}
+                              disabled={!piiAiConfig?.ai_enabled}
+                              className="w-full border border-slate-300 rounded px-2 py-1 text-xs disabled:bg-gray-50"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={() => savePiiAIConfig(piiAiConfig)}
+                            disabled={!piiAiConfig?.ai_enabled}
+                            className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            Save AI Config
+                          </button>
+                          <button
+                            onClick={fetchPiiStats}
+                            className="bg-gray-600 text-white px-3 py-1 rounded text-xs hover:bg-gray-700 transition-colors"
+                          >
+                            Refresh Stats
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* AI Test Interface */}
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Test Content</label>
+                          <textarea
+                            value={piiTestContent}
+                            onChange={(e) => setPiiTestContent(e.target.value)}
+                            placeholder="Enter content to test for PII detection..."
+                            className="w-full border border-slate-300 rounded px-2 py-1 text-xs"
+                            rows={3}
+                          />
+                        </div>
+                        
+                        <div className="flex items-center space-x-3">
+                          <button
+                            onClick={testPii}
+                            disabled={!piiTestContent.trim() || piiTestLoading}
+                            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {piiTestLoading ? 'Testing...' : 'Test PII Detection'}
+                          </button>
+                          
+                          {piiTestResult && (
+                            <div className="flex items-center space-x-4">
+                              <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+                                piiTestResult.detected ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'
+                              }`}>
+                                {piiTestResult.detected ? 'PII Detected' : 'No PII Found'}
+                              </div>
+                              <div className="text-sm text-slate-600">
+                                Score: <span className="font-medium">{(piiTestResult.score * 100).toFixed(1)}%</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {piiTestResult && (
+                          <div className="bg-slate-50 rounded-lg p-4 text-sm">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
+                              <div>
+                                <div className="font-medium text-slate-700">Detection Score</div>
+                                <div className="text-red-600">{(piiTestResult.score * 100).toFixed(1)}%</div>
+                              </div>
+                              <div>
+                                <div className="font-medium text-slate-700">Risk Level</div>
+                                <div className={`${
+                                  piiTestResult.risk_level === 'high' ? 'text-red-600' :
+                                  piiTestResult.risk_level === 'medium' ? 'text-yellow-600' : 'text-green-600'
+                                }`}>
+                                  {piiTestResult.risk_level?.toUpperCase() || 'LOW'}
+                                </div>
+                              </div>
+                              <div>
+                                <div className="font-medium text-slate-700">Method</div>
+                                <div className="text-blue-600">{piiTestResult.method || 'Pattern Match'}</div>
+                              </div>
+                            </div>
+                            {piiTestResult.detected && (
+                              <div className="mt-3">
+                                <div className="font-medium text-slate-700 mb-1">Detected PII Types:</div>
+                                <div className="flex flex-wrap gap-2 mb-3">
+                                  {(piiTestResult.types || []).map((type: string, i: number) => (
+                                    <span key={i} className="bg-red-100 text-red-800 px-2 py-1 rounded text-xs">
+                                      {type}
+                                    </span>
+                                  ))}
+                                </div>
+                                {piiTestResult.masked_content && (
+                                  <div>
+                                    <div className="font-medium text-slate-700 mb-1">Masked Content:</div>
+                                    <div className="bg-white border rounded p-2 text-xs font-mono">
+                                      {piiTestResult.masked_content}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* PII Detection Settings */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div>
+                      <h3 className="text-lg font-semibold text-slate-900 mb-4">Detection Types</h3>
+                      <div className="space-y-4">
+                        {[
+                          { key: 'detect_email', label: 'Email Addresses', icon: '📧', confidence: 'email_confidence' },
+                          { key: 'detect_phone', label: 'Phone Numbers', icon: '📞', confidence: 'phone_confidence' },
+                          { key: 'detect_ssn', label: 'Social Security Numbers', icon: '🆔', confidence: 'ssn_confidence' },
+                          { key: 'detect_credit_card', label: 'Credit Card Numbers', icon: '💳', confidence: 'credit_card_confidence' }
+                        ].map((type) => (
+                          <div key={type.key} className="border border-slate-200 rounded-lg p-4">
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center space-x-2">
+                                <span>{type.icon}</span>
+                                <span className="font-medium text-slate-900">{type.label}</span>
+                              </div>
+                              <input
+                                type="checkbox"
+                                checked={piiLayer.options?.[type.key] ?? true}
+                                onChange={(e) => updateLayerConfig(piiLayerIndex, `options.${type.key}`, e.target.checked)}
+                                className="rounded"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-slate-600 mb-1">
+                                Confidence Threshold
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                max="1"
+                                step="0.01"
+                                value={piiLayer.options?.[type.confidence] ?? 0.9}
+                                onChange={(e) => updateLayerConfig(piiLayerIndex, `options.${type.confidence}`, parseFloat(e.target.value))}
+                                className="w-full border border-slate-300 rounded px-2 py-1 text-xs"
+                                disabled={!piiLayer.options?.[type.key]}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <h3 className="text-lg font-semibold text-slate-900 mb-4">Privacy & Security</h3>
+                      <div className="space-y-4">
+                        <div className="border border-slate-200 rounded-lg p-4">
+                          <div className="flex items-center justify-between mb-3">
+                            <div>
+                              <div className="font-medium text-slate-900">PII Masking</div>
+                              <div className="text-sm text-slate-600">
+                                Automatically mask detected PII in logs and responses
+                              </div>
+                            </div>
+                            <input
+                              type="checkbox"
+                              checked={piiLayer.options?.masking_enabled ?? true}
+                              onChange={(e) => updateLayerConfig(piiLayerIndex, 'options.masking_enabled', e.target.checked)}
+                              className="rounded"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="border border-slate-200 rounded-lg p-4">
+                          <div className="font-medium text-slate-900 mb-3">Custom Patterns</div>
+                          <div className="text-sm text-slate-600 mb-3">
+                            Add custom regex patterns for organization-specific PII
+                          </div>
+                          <textarea
+                            placeholder="Enter custom regex patterns (one per line)"
+                            value={piiLayer.options?.custom_patterns?.join('\n') ?? ''}
+                            onChange={(e) => updateLayerConfig(piiLayerIndex, 'options.custom_patterns', e.target.value.split('\n').filter(p => p.trim()))}
+                            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                            rows={4}
+                          />
+                        </div>
+
+                        <div className="border border-slate-200 rounded-lg p-4">
+                          <div className="font-medium text-slate-900 mb-3">Alert Settings</div>
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm text-slate-700">Real-time alerts for PII detection</span>
+                              <input
+                                type="checkbox"
+                                checked={piiLayer.options?.realtime_alerts ?? true}
+                                onChange={(e) => updateLayerConfig(piiLayerIndex, 'options.realtime_alerts', e.target.checked)}
+                                className="rounded"
+                              />
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm text-slate-700">Email notifications for high-risk PII</span>
+                              <input
+                                type="checkbox"
+                                checked={piiLayer.options?.email_alerts ?? false}
+                                onChange={(e) => updateLayerConfig(piiLayerIndex, 'options.email_alerts', e.target.checked)}
+                                className="rounded"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )
             })()}

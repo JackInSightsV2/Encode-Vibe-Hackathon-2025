@@ -18,12 +18,21 @@ import (
 	"qt1-middleware/metrics"
 	"qt1-middleware/middleware"
 	"qt1-middleware/api"
+	"qt1-middleware/opik"
+	
+	"github.com/joho/godotenv"
 )
 
 var db *database.Database
 var authManager *auth.AuthManager
+var opikClient *opik.OpikClient
 
 func main() {
+	// Load .env file if it exists
+	if err := godotenv.Load(); err != nil {
+		log.Printf("No .env file found or error loading .env file: %v", err)
+	}
+	
 	// Load configuration
 	configPath := "config.yaml"
 	if len(os.Args) > 1 {
@@ -32,6 +41,30 @@ func main() {
 	
 	if err := config.LoadConfig(configPath); err != nil {
 		log.Fatalf("Failed to load config: %v", err)
+	}
+	
+	// Initialize Opik client early if enabled
+	if config.AppConfig.Opik.Enabled {
+		opikConfig := opik.OpikConfig{
+			Enabled:       config.AppConfig.Opik.Enabled,
+			APIKey:        config.AppConfig.Opik.APIKey,
+			ProjectName:   config.AppConfig.Opik.ProjectName,
+			BaseURL:       config.AppConfig.Opik.BaseURL,
+			BatchSize:     config.AppConfig.Opik.BatchSize,
+			FlushInterval: config.AppConfig.Opik.FlushInterval,
+		}
+		
+		var err error
+		opikClient, err = opik.NewOpikClient(opikConfig)
+		if err != nil {
+			log.Fatalf("Failed to create Opik client: %v", err)
+		}
+		defer opikClient.Close()
+		
+		log.Printf("Opik integration enabled for project: %s", opikConfig.ProjectName)
+		
+		// Set global Opik client for API handlers
+		api.SetOpikClient(opikClient)
 	}
 	
 	// Create logs directory
@@ -102,6 +135,11 @@ func main() {
 	
 	// Initialize middleware
 	proxy := middleware.NewProxy()
+	
+	// Pass Opik client to proxy if available
+	if opikClient != nil {
+		proxy.SetOpikClient(opikClient)
+	}
 	
 	// Set proxy instance for moderation engine access
 	api.SetProxy(proxy)
@@ -233,13 +271,15 @@ func main() {
 		http.HandleFunc("/api/metrics/providers", corsHandler(metricsHandler.HandleProviderHealth))
 		http.HandleFunc("/api/metrics/timeseries", corsHandler(metricsHandler.HandleTimeSeries))
 		
-		// Add metrics middleware to proxy routes
-		http.HandleFunc("/chat", metricsHandler.RecordHTTPMetrics(http.HandlerFunc(proxy.HandleChat)).ServeHTTP)
+		// Add metrics middleware to proxy routes with CORS
+		http.HandleFunc("/chat", corsHandler(func(w http.ResponseWriter, r *http.Request) {
+			metricsHandler.RecordHTTPMetrics(http.HandlerFunc(proxy.HandleChat)).ServeHTTP(w, r)
+		}))
 		
 		log.Printf("Metrics API endpoints registered")
 	} else {
-		// Register chat route without metrics
-		http.HandleFunc("/chat", proxy.HandleChat)
+		// Register chat route without metrics but with CORS
+		http.HandleFunc("/chat", corsHandler(proxy.HandleChat))
 	}
 	
 	// Register authentication routes
@@ -319,12 +359,29 @@ func main() {
 	http.HandleFunc("/api/relevancy/ai-provider", corsHandler(api.HandleRelevancyAIProvider))
 	http.HandleFunc("/api/relevancy/ai-test", corsHandler(api.HandleRelevancyAITest))
 	
+	// Regex AI endpoints
+	http.HandleFunc("/api/regex/ai-provider", corsHandler(api.HandleRegexAIProvider))
+	http.HandleFunc("/api/regex/ai-test", corsHandler(api.HandleRegexAITest))
+	http.HandleFunc("/api/regex/stats", corsHandler(api.HandleRegexStats))
+	
+	// PII AI endpoints
+	http.HandleFunc("/api/pii/ai-provider", corsHandler(api.HandlePiiAIProvider))
+	http.HandleFunc("/api/pii/ai-test", corsHandler(api.HandlePiiAITest))
+	http.HandleFunc("/api/pii/stats", corsHandler(api.HandlePiiStats))
+	
 	// Kill Switch endpoints
 	http.HandleFunc("/api/killswitch/status", api.HandleKillSwitchStatus)
 	http.HandleFunc("/api/killswitch", api.HandleKillSwitch)
 	
 	// Logs endpoints
 	http.HandleFunc("/api/logs", api.HandleLogs)
+	
+	// Opik Integration endpoints
+	http.HandleFunc("/api/opik/status", corsHandler(api.HandleOpikStatus))
+	http.HandleFunc("/api/opik/traces", corsHandler(api.HandleOpikTraces))
+	http.HandleFunc("/api/opik/evaluations", corsHandler(api.HandleOpikEvaluations))
+	http.HandleFunc("/api/opik/config", corsHandler(api.HandleOpikConfig))
+	http.HandleFunc("/api/opik/test-connection", corsHandler(api.HandleOpikTestConnection))
 	
 	log.Printf("Additional API endpoints registered")
 	
